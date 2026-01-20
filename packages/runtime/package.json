@@ -1,0 +1,44 @@
+{
+  "name": "@karibulab/wsdl2tsx-runtime",
+  "version": "1.0.0",
+  "description": "Runtime XML para código TSX generado desde WSDL",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./jsx-runtime": {
+      "import": "./dist/jsx-runtime.js",
+      "types": "./dist/jsx-runtime.d.ts",
+      "default": "./dist/jsx-runtime.js"
+    },
+    "./jsx-runtime.js": {
+      "import": "./dist/jsx-runtime.js",
+      "types": "./dist/jsx-runtime.d.ts",
+      "default": "./dist/jsx-runtime.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "jsx-runtime": ["./dist/jsx-runtime.d.ts"],
+      "jsx-runtime.js": ["./dist/jsx-runtime.d.ts"]
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "xml",
+    "soap",
+    "wsdl",
+    "runtime"
+  ],
+  "license": "ISC"
+}

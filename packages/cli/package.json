@@ -1,0 +1,43 @@
+{
+  "name": "wsdl2tsx",
+  "version": "1.0.0",
+  "description": "Generador de código TSX desde archivos WSDL",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "wsdl2tsx": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --watch"
+  },
+  "dependencies": {
+    "@karibulab/wsdl2tsx-runtime": "*",
+    "axios": "^1.7.9",
+    "fast-xml-parser": "5.3.3",
+    "handlebars": "4.7.8"
+  },
+  "devDependencies": {
+    "@types/node": "25.0.9",
+    "esbuild": "^0.27.2",
+    "typescript": "5.9.3"
+  },
+  "keywords": [
+    "wsdl",
+    "soap",
+    "typescript",
+    "code-generator"
+  ],
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KaribuLab/wsdl2tsx.git"
+  },
+  "bugs": {
+    "url": "https://github.com/KaribuLab/wsdl2tsx/issues"
+  },
+  "homepage": "https://github.com/KaribuLab/wsdl2tsx#readme"
+}

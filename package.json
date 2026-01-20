@@ -1,0 +1,28 @@
+{
+  "name": "wsdl2tsx-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "build:runtime": "npm run build --workspace=@karibulab/wsdl2tsx-runtime",
+    "build:cli": "npm run build --workspace=wsdl2tsx",
+    "pack": "node scripts/pack.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KaribuLab/wsdl2tsx.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/KaribuLab/wsdl2tsx/issues"
+  },
+  "homepage": "https://github.com/KaribuLab/wsdl2tsx#readme",
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

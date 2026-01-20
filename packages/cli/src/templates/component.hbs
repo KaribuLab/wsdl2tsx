@@ -1,0 +1,32 @@
+import { soap, ns, xml } from "@karibulab/wsdl2tsx-runtime";
+
+{{#each namespaces}}
+const {{@key}} = ns("{{@key}}", [{{tagNamesArray this}}] as const);
+{{/each}}
+
+{{#each simpleTypes}}
+export type {{pascalCase name}} = {{tsType}}
+{{/each}}
+
+export interface {{pascalCase requestType}}Props {
+{{#each propsInterface.properties}}
+	{{camelCase name}}: {{name}}{{#unless @last}},{{/unless}}
+{{/each}}
+}
+
+{{#each interfaces}}
+export interface {{pascalCase name}} {
+{{#each properties}}
+	{{camelCase name}}: {{type}}{{#if modifier}}{{modifier}}{{/if}}{{#unless @last}},{{/unless}}
+{{/each}}
+}
+{{/each}}
+export function {{pascalCase requestType}}(props: {{pascalCase requestType}}Props) {
+    return <soap.Envelope xmlns:soap="{{soapNamespaceURI}}"
+    {{xmlnsAttributes xmlnsAttributes}}>
+    <soap.Header />
+    <soap.Body>
+    {{{xmlBody}}}
+    </soap.Body>
+</soap.Envelope>
+}

@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "es2020",
+    "module": "esnext",
+    "jsx": "react-jsx",
+    "jsxImportSource": "@karibulab/wsdl2tsx-runtime/jsx-runtime",
+    "moduleResolution": "node",
+    "baseUrl": "src",
+    "strict": true,
+    "outDir": "dist",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true
+  },
+  "include": ["src"]
+}
