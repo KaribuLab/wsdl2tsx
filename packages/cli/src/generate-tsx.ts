@@ -18,6 +18,11 @@ import { registerHandlebarsHelpers } from "./template-helpers.js";
 import Handlebars, { type TemplateDelegate } from "handlebars";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
+
+// Obtener el directorio del archivo actual (para ES modules)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * Verifica si un tipo está referenciado en algún lugar del objeto de tipo
@@ -78,42 +83,12 @@ function isTypeReferenced(typeName: string, typeObject: any, allComplexTypes: an
     return false;
 }
 
-// Template Handlebars embebido como string
-const TEMPLATE_SOURCE = `import { soap, ns, xml } from "@karibulab/wsdl2tsx-runtime";
-
-{{#each namespaces}}
-const {{@key}} = ns("{{@key}}", [{{tagNamesArray this}}] as const);
-{{/each}}
-
-{{#each simpleTypes}}
-export type {{pascalCase name}} = {{tsType}}
-{{/each}}
-
-export interface {{pascalCase requestType}}Props {
-{{#each propsInterface.properties}}
-	{{camelCase name}}: {{type}}{{#unless @last}},{{/unless}}
-{{/each}}
-}
-
-{{#each interfaces}}
-export interface {{pascalCase name}} {
-{{#each properties}}
-	{{camelCase name}}: {{type}}{{#if modifier}}{{modifier}}{{/if}}{{#unless @last}},{{/unless}}
-{{/each}}
-}
-{{/each}}
-export function {{pascalCase requestType}}(props: {{pascalCase requestType}}Props) {
-    return <soap.Envelope xmlns:soap="{{soapNamespaceURI}}"
-    {{xmlnsAttributes xmlnsAttributes}}>
-    <soap.Header />
-    <soap.Body>
-    {{{xmlBody}}}
-    </soap.Body>
-</soap.Envelope>
-}`;
+// Ruta al template Handlebars
+const TEMPLATE_PATH = path.join(__dirname, "templates", "component.hbs");
 
 // Cache para el template compilado
 let compiledTemplate: TemplateDelegate | null = null;
+let templateSource: string | null = null;
 
 const SOAP12_ENVELOPE_URI = 'http://www.w3.org/2003/05/soap-envelope';
 const SOAP11_ENVELOPE_URI = 'http://schemas.xmlsoap.org/soap/envelope/';
@@ -142,9 +117,14 @@ function compileTemplate(templateData: any): string {
     // Registrar helpers de Handlebars (solo una vez)
     registerHandlebarsHelpers();
     
+    // Leer y cachear el template
+    if (!templateSource) {
+        templateSource = fs.readFileSync(TEMPLATE_PATH, "utf-8");
+    }
+    
     // Cachear el template compilado
     if (!compiledTemplate) {
-        compiledTemplate = Handlebars.compile(TEMPLATE_SOURCE);
+        compiledTemplate = Handlebars.compile(templateSource);
     }
     
     // Compilar el template con los datos

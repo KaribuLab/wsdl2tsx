@@ -1,4 +1,4 @@
-import { soap, ns, xml } from "@karibulab/wsdl2tsx-runtime";
+import { soap, ns } from "@karibulab/wsdl2tsx-runtime";
 
 {{#each namespaces}}
 const {{@key}} = ns("{{@key}}", [{{tagNamesArray this}}] as const);
