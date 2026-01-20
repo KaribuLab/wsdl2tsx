@@ -7,6 +7,7 @@ import { XMLParser } from "fast-xml-parser";
 interface XmlNode {
     [key: string]: any;
     targetNamespace?: string;
+    elementFormDefault?: string;
     name?: string;
     type?: string;
     ref?: string;
@@ -95,7 +96,7 @@ const fillObject = (object: any, namespaces: Map<string, string>, complexTypes: 
 };
 
 // Función para procesar un elemento individual
-const processSingleElement = (node: XmlNode, namespaces: Map<string, string>, complexTypes: ComplexTypes | undefined, targetNamespace: string | undefined): any => {
+const processSingleElement = (node: XmlNode, namespaces: Map<string, string>, complexTypes: ComplexTypes | undefined, targetNamespace: string | undefined, isQualified: boolean = false): any => {
     // Manejar elementos <any> que no tienen type
     if (node.type === undefined) {
         // Si es un elemento <any>, usar un tipo genérico
@@ -118,7 +119,7 @@ const processSingleElement = (node: XmlNode, namespaces: Map<string, string>, co
     // Manejar elementos con complexType inline
     if (node.complexType !== undefined || node['xsd:complexType'] !== undefined) {
         const complexTypeNode = node.complexType || node['xsd:complexType'];
-        const inlineType = complexTypeToObject(complexTypeNode, namespaces, complexTypes ?? {}, targetNamespace);
+        const inlineType = complexTypeToObject(complexTypeNode, namespaces, complexTypes ?? {}, targetNamespace, isQualified);
         return inlineType;
     }
     
@@ -146,13 +147,14 @@ const processSingleElement = (node: XmlNode, namespaces: Map<string, string>, co
 };
 
 // Función genérica para procesar elementos (usada por sequence, choice, all)
-const processElementsToObject = (elementNode: XmlNode | XmlNode[] | undefined, namespaces: Map<string, string>, complexTypes: ComplexTypes | undefined, targetNamespace: string | undefined): any => {
+const processElementsToObject = (elementNode: XmlNode | XmlNode[] | undefined, namespaces: Map<string, string>, complexTypes: ComplexTypes | undefined, targetNamespace: string | undefined, isQualified: boolean = false): any => {
     // Si elementNode es undefined, retornar objeto vacío
     if (elementNode === undefined) {
         const object: any = {};
         if (targetNamespace !== undefined) {
             object["$namespace"] = targetNamespace;
         }
+        object["$qualified"] = isQualified;
         return object;
     }
     
@@ -162,17 +164,20 @@ const processElementsToObject = (elementNode: XmlNode | XmlNode[] | undefined, n
         if (targetNamespace !== undefined) {
             object["$namespace"] = targetNamespace;
         }
+        object["$qualified"] = isQualified;
         for (const node of elementNode) {
             // Manejar elementos <any> que no tienen name
             if (node === undefined || node.name === undefined) {
                 // Es un elemento <any> o undefined, podemos omitirlo o agregarlo como tipo especial
                 continue;
             }
-            const processedType = processSingleElement(node, namespaces, complexTypes, targetNamespace);
+            const processedType = processSingleElement(node, namespaces, complexTypes, targetNamespace, isQualified);
             object[node.name] = {
                 maxOccurs: node.maxOccurs ?? '1',
                 minOccurs: node.minOccurs ?? '1',
                 type: processedType,
+                $qualified: isQualified,
+                $namespace: targetNamespace,  // Asignar el namespace del schema donde está definido el elemento
             };
         }
         return object;
@@ -182,6 +187,7 @@ const processElementsToObject = (elementNode: XmlNode | XmlNode[] | undefined, n
         if (targetNamespace !== undefined) {
             object["$namespace"] = targetNamespace;
         }
+        object["$qualified"] = isQualified;
         
         // Manejar elementos <any> que no tienen name
         if (elementNode.name === undefined) {
@@ -189,53 +195,55 @@ const processElementsToObject = (elementNode: XmlNode | XmlNode[] | undefined, n
             return object;
         }
         
-        const processedType = processSingleElement(elementNode, namespaces, complexTypes, targetNamespace);
+        const processedType = processSingleElement(elementNode, namespaces, complexTypes, targetNamespace, isQualified);
         object[elementNode.name] = {
             maxOccurs: elementNode.maxOccurs ?? '1',
             minOccurs: elementNode.minOccurs ?? '1',
             type: processedType,
+            $qualified: isQualified,
+            $namespace: targetNamespace,  // Asignar el namespace del schema donde está definido el elemento
         };
         return object;
     }
 };
 
-export const sequenceToObject = (node: XmlNode, namespaces: Map<string, string>, complexTypes: ComplexTypes | undefined, targetNamespace: string | undefined): any => {
+export const sequenceToObject = (node: XmlNode, namespaces: Map<string, string>, complexTypes: ComplexTypes | undefined, targetNamespace: string | undefined, isQualified: boolean = false): any => {
     const elementNode = getElementNode(node);
-    return processElementsToObject(elementNode, namespaces, complexTypes, targetNamespace);
+    return processElementsToObject(elementNode, namespaces, complexTypes, targetNamespace, isQualified);
 };
 
-export const choiceToObject = (node: XmlNode, namespaces: Map<string, string>, complexTypes: ComplexTypes | undefined, targetNamespace: string | undefined): any => {
+export const choiceToObject = (node: XmlNode, namespaces: Map<string, string>, complexTypes: ComplexTypes | undefined, targetNamespace: string | undefined, isQualified: boolean = false): any => {
     const elementNode = getElementNode(node);
-    return processElementsToObject(elementNode, namespaces, complexTypes, targetNamespace);
+    return processElementsToObject(elementNode, namespaces, complexTypes, targetNamespace, isQualified);
 };
 
-export const allToObject = (node: XmlNode, namespaces: Map<string, string>, complexTypes: ComplexTypes | undefined, targetNamespace: string | undefined): any => {
+export const allToObject = (node: XmlNode, namespaces: Map<string, string>, complexTypes: ComplexTypes | undefined, targetNamespace: string | undefined, isQualified: boolean = false): any => {
     const elementNode = getElementNode(node);
-    return processElementsToObject(elementNode, namespaces, complexTypes, targetNamespace);
+    return processElementsToObject(elementNode, namespaces, complexTypes, targetNamespace, isQualified);
 };
 
-export const groupToObject = (node: XmlNode, namespaces: Map<string, string>, complexTypes: ComplexTypes | undefined, targetNamespace: string | undefined): any => {
+export const groupToObject = (node: XmlNode, namespaces: Map<string, string>, complexTypes: ComplexTypes | undefined, targetNamespace: string | undefined, isQualified: boolean = false): any => {
     // Un group puede contener sequence, choice, all, etc.
     // Primero intentamos obtener los elementos directamente del group
     const elementNode = getElementNode(node);
     if (elementNode !== undefined) {
-        return processElementsToObject(elementNode, namespaces, complexTypes, targetNamespace);
+        return processElementsToObject(elementNode, namespaces, complexTypes, targetNamespace, isQualified);
     }
     
     // Si no hay elementos directos, buscamos sequence, choice, all dentro del group
     const sequenceNode = getSequenceNode(node);
     if (sequenceNode !== undefined) {
-        return sequenceToObject(sequenceNode, namespaces, complexTypes, targetNamespace);
+        return sequenceToObject(sequenceNode, namespaces, complexTypes, targetNamespace, isQualified);
     }
     
     const choiceNode = getChoiceNode(node);
     if (choiceNode !== undefined) {
-        return choiceToObject(choiceNode, namespaces, complexTypes, targetNamespace);
+        return choiceToObject(choiceNode, namespaces, complexTypes, targetNamespace, isQualified);
     }
     
     const allNode = getAllNode(node);
     if (allNode !== undefined) {
-        return allToObject(allNode, namespaces, complexTypes, targetNamespace);
+        return allToObject(allNode, namespaces, complexTypes, targetNamespace, isQualified);
     }
     
     // Si no encontramos nada, retornamos objeto vacío
@@ -243,14 +251,16 @@ export const groupToObject = (node: XmlNode, namespaces: Map<string, string>, co
     if (targetNamespace !== undefined) {
         object["$namespace"] = targetNamespace;
     }
+    object["$qualified"] = isQualified;
     return object;
 };
 
-export const simpleContentToObject = (node: XmlNode, namespaces: Map<string, string>, complexTypes: ComplexTypes | undefined, targetNamespace: string | undefined): any => {
+export const simpleContentToObject = (node: XmlNode, namespaces: Map<string, string>, complexTypes: ComplexTypes | undefined, targetNamespace: string | undefined, isQualified: boolean = false): any => {
     const object: any = {};
     if (targetNamespace !== undefined) {
         object["$namespace"] = targetNamespace;
     }
+    object["$qualified"] = isQualified;
     
     // Buscar extension o restriction dentro de simpleContent
     const extensionNode = getExtensionNode(node);
@@ -279,7 +289,7 @@ export const simpleContentToObject = (node: XmlNode, namespaces: Map<string, str
         // Buscar sequence, choice, all dentro del extension (aunque es raro en simpleContent)
         const sequenceNode = getSequenceNode(extensionNode);
         if (sequenceNode !== undefined) {
-            const seqResult = sequenceToObject(sequenceNode, namespaces, complexTypes, targetNamespace);
+            const seqResult = sequenceToObject(sequenceNode, namespaces, complexTypes, targetNamespace, isQualified);
             Object.assign(object, seqResult);
         }
         
@@ -314,11 +324,12 @@ export const simpleContentToObject = (node: XmlNode, namespaces: Map<string, str
     return object;
 };
 
-export const complexContentToObject = (node: XmlNode, namespaces: Map<string, string>, complexTypes: ComplexTypes | undefined, targetNamespace: string | undefined): any => {
+export const complexContentToObject = (node: XmlNode, namespaces: Map<string, string>, complexTypes: ComplexTypes | undefined, targetNamespace: string | undefined, isQualified: boolean = false): any => {
     const object: any = {};
     if (targetNamespace !== undefined) {
         object["$namespace"] = targetNamespace;
     }
+    object["$qualified"] = isQualified;
     
     // Buscar extension o restriction dentro de complexContent
     const extensionNode = getExtensionNode(node);
@@ -331,19 +342,19 @@ export const complexContentToObject = (node: XmlNode, namespaces: Map<string, st
         // Buscar sequence, choice, all dentro del extension
         const sequenceNode = getSequenceNode(extensionNode);
         if (sequenceNode !== undefined) {
-            const seqResult = sequenceToObject(sequenceNode, namespaces, complexTypes, targetNamespace);
+            const seqResult = sequenceToObject(sequenceNode, namespaces, complexTypes, targetNamespace, isQualified);
             Object.assign(object, seqResult);
         }
         
         const choiceNode = getChoiceNode(extensionNode);
         if (choiceNode !== undefined) {
-            const choiceResult = choiceToObject(choiceNode, namespaces, complexTypes, targetNamespace);
+            const choiceResult = choiceToObject(choiceNode, namespaces, complexTypes, targetNamespace, isQualified);
             Object.assign(object, choiceResult);
         }
         
         const allNode = getAllNode(extensionNode);
         if (allNode !== undefined) {
-            const allResult = allToObject(allNode, namespaces, complexTypes, targetNamespace);
+            const allResult = allToObject(allNode, namespaces, complexTypes, targetNamespace, isQualified);
             Object.assign(object, allResult);
         }
         
@@ -375,19 +386,19 @@ export const complexContentToObject = (node: XmlNode, namespaces: Map<string, st
         
         const sequenceNode = getSequenceNode(restrictionNode);
         if (sequenceNode !== undefined) {
-            const seqResult = sequenceToObject(sequenceNode, namespaces, complexTypes, targetNamespace);
+            const seqResult = sequenceToObject(sequenceNode, namespaces, complexTypes, targetNamespace, isQualified);
             Object.assign(object, seqResult);
         }
         
         const choiceNode = getChoiceNode(restrictionNode);
         if (choiceNode !== undefined) {
-            const choiceResult = choiceToObject(choiceNode, namespaces, complexTypes, targetNamespace);
+            const choiceResult = choiceToObject(choiceNode, namespaces, complexTypes, targetNamespace, isQualified);
             Object.assign(object, choiceResult);
         }
         
         const allNode = getAllNode(restrictionNode);
         if (allNode !== undefined) {
-            const allResult = allToObject(allNode, namespaces, complexTypes, targetNamespace);
+            const allResult = allToObject(allNode, namespaces, complexTypes, targetNamespace, isQualified);
             Object.assign(object, allResult);
         }
         
@@ -506,51 +517,53 @@ export const getComplexTypeNode = (node: XmlNode): XmlNode | undefined => {
     return node[complexTypeField!];
 };
 
-export const complexTypeToObject = (node: XmlNode | XmlNode[] | undefined | null, namespaces: Map<string, string>, complexTypes: ComplexTypes, targetNamespace: string | undefined): any => {
+export const complexTypeToObject = (node: XmlNode | XmlNode[] | undefined | null, namespaces: Map<string, string>, complexTypes: ComplexTypes, targetNamespace: string | undefined, isQualified: boolean = false): any => {
     if (!node) {
         // Retornar objeto vacío si el nodo es undefined o null
         const object: any = {};
         if (targetNamespace !== undefined) {
             object["$namespace"] = targetNamespace;
         }
+        object["$qualified"] = isQualified;
         return object;
     }
     if (Array.isArray(node)) {
         const resultObject: any = {};
+        resultObject["$qualified"] = isQualified;
         for (const item of node) {
             const sequenceNode = getSequenceNode(item);
             if (sequenceNode !== undefined) {
-                resultObject[item.name!] = sequenceToObject(sequenceNode, namespaces, complexTypes, targetNamespace);
+                resultObject[item.name!] = sequenceToObject(sequenceNode, namespaces, complexTypes, targetNamespace, isQualified);
                 continue;
             }
             
             const choiceNode = getChoiceNode(item);
             if (choiceNode !== undefined) {
-                resultObject[item.name!] = choiceToObject(choiceNode, namespaces, complexTypes, targetNamespace);
+                resultObject[item.name!] = choiceToObject(choiceNode, namespaces, complexTypes, targetNamespace, isQualified);
                 continue;
             }
             
             const allNode = getAllNode(item);
             if (allNode !== undefined) {
-                resultObject[item.name!] = allToObject(allNode, namespaces, complexTypes, targetNamespace);
+                resultObject[item.name!] = allToObject(allNode, namespaces, complexTypes, targetNamespace, isQualified);
                 continue;
             }
             
             const groupNode = getGroupNode(item);
             if (groupNode !== undefined) {
-                resultObject[item.name!] = groupToObject(groupNode, namespaces, complexTypes, targetNamespace);
+                resultObject[item.name!] = groupToObject(groupNode, namespaces, complexTypes, targetNamespace, isQualified);
                 continue;
             }
             
             const simpleContentNode = getSimpleContentNode(item);
             if (simpleContentNode !== undefined) {
-                resultObject[item.name!] = simpleContentToObject(simpleContentNode, namespaces, complexTypes, targetNamespace);
+                resultObject[item.name!] = simpleContentToObject(simpleContentNode, namespaces, complexTypes, targetNamespace, isQualified);
                 continue;
             }
             
             const complexContentNode = getComplexContentNode(item);
             if (complexContentNode !== undefined) {
-                resultObject[item.name!] = complexContentToObject(complexContentNode, namespaces, complexTypes, targetNamespace);
+                resultObject[item.name!] = complexContentToObject(complexContentNode, namespaces, complexTypes, targetNamespace, isQualified);
                 continue;
             }
         }
@@ -559,61 +572,67 @@ export const complexTypeToObject = (node: XmlNode | XmlNode[] | undefined | null
         // Buscar sequence primero
         const sequenceNode = getSequenceNode(node);
         if (sequenceNode !== undefined) {
-            const result = sequenceToObject(sequenceNode, namespaces, complexTypes, targetNamespace);
+            const result = sequenceToObject(sequenceNode, namespaces, complexTypes, targetNamespace, isQualified);
             // Establecer el namespace del objeto complejo al targetNamespace del schema
             if (targetNamespace !== undefined) {
                 result["$namespace"] = targetNamespace;
             }
+            result["$qualified"] = isQualified;
             return result;
         }
         
         // Buscar choice
         const choiceNode = getChoiceNode(node);
         if (choiceNode !== undefined) {
-            const result = choiceToObject(choiceNode, namespaces, complexTypes, targetNamespace);
+            const result = choiceToObject(choiceNode, namespaces, complexTypes, targetNamespace, isQualified);
             if (targetNamespace !== undefined) {
                 result["$namespace"] = targetNamespace;
             }
+            result["$qualified"] = isQualified;
             return result;
         }
         
         // Buscar all
         const allNode = getAllNode(node);
         if (allNode !== undefined) {
-            const result = allToObject(allNode, namespaces, complexTypes, targetNamespace);
+            const result = allToObject(allNode, namespaces, complexTypes, targetNamespace, isQualified);
             if (targetNamespace !== undefined) {
                 result["$namespace"] = targetNamespace;
             }
+            result["$qualified"] = isQualified;
             return result;
         }
         
         // Buscar group
         const groupNode = getGroupNode(node);
         if (groupNode !== undefined) {
-            const result = groupToObject(groupNode, namespaces, complexTypes, targetNamespace);
+            const result = groupToObject(groupNode, namespaces, complexTypes, targetNamespace, isQualified);
             if (targetNamespace !== undefined) {
                 result["$namespace"] = targetNamespace;
             }
+            result["$qualified"] = isQualified;
             return result;
         }
         
         // Buscar simpleContent
         const simpleContentNode = getSimpleContentNode(node);
         if (simpleContentNode !== undefined) {
-            const result = simpleContentToObject(simpleContentNode, namespaces, complexTypes, targetNamespace);
+            const result = simpleContentToObject(simpleContentNode, namespaces, complexTypes, targetNamespace, isQualified);
             if (targetNamespace !== undefined) {
                 result["$namespace"] = targetNamespace;
             }
+            result["$qualified"] = isQualified;
             return result;
         }
         
         // Buscar complexContent
         const complexContentNode = getComplexContentNode(node);
         if (complexContentNode !== undefined) {
-            const result = complexContentToObject(complexContentNode, namespaces, complexTypes, targetNamespace);
+            const result = complexContentToObject(complexContentNode, namespaces, complexTypes, targetNamespace, isQualified);
             if (targetNamespace !== undefined) {
                 result["$namespace"] = targetNamespace;
             }
+            result["$qualified"] = isQualified;
             return result;
         }
         
@@ -623,6 +642,7 @@ export const complexTypeToObject = (node: XmlNode | XmlNode[] | undefined | null
 
 export const complexTypesFromSchema = async (wsdlFile: string, node: XmlNode, namespaces: Map<string, string> | undefined): Promise<ComplexTypes> => {
     const targetNamespace = node.targetNamespace;
+    const isQualified = node.elementFormDefault === 'qualified';
     const schemaNamespaces = namespaces ?? getNamespacesFromNode(node);
     const currentNamespaces = schemaNamespaces;
     let object: ComplexTypes = {};
@@ -669,10 +689,10 @@ export const complexTypesFromSchema = async (wsdlFile: string, node: XmlNode, na
     if (complexTypeNode !== undefined) {
         if (Array.isArray(complexTypeNode)) {
             for (const item of complexTypeNode) {
-                object[targetNamespace + ':' + item.name!] = complexTypeToObject(item, currentNamespaces, object, targetNamespace);
+                object[targetNamespace + ':' + item.name!] = complexTypeToObject(item, currentNamespaces, object, targetNamespace, isQualified);
             }
         } else {
-            object[targetNamespace + ':' + complexTypeNode.name!] = complexTypeToObject(complexTypeNode, currentNamespaces, object, targetNamespace);
+            object[targetNamespace + ':' + complexTypeNode.name!] = complexTypeToObject(complexTypeNode, currentNamespaces, object, targetNamespace, isQualified);
         }
     }
     // Buscar elementos con complexType inline (elementos que tienen complexType dentro de ellos)
@@ -683,20 +703,20 @@ export const complexTypesFromSchema = async (wsdlFile: string, node: XmlNode, na
                 const itemComplexType = getComplexTypeNode(item);
                 if (itemComplexType !== undefined) {
                     // Elemento con complexType inline
-                    object[targetNamespace + ':' + item.name!] = complexTypeToObject(itemComplexType, currentNamespaces, object, targetNamespace);
+                    object[targetNamespace + ':' + item.name!] = complexTypeToObject(itemComplexType, currentNamespaces, object, targetNamespace, isQualified);
                 } else if (getSequenceNode(item) !== undefined) {
                     // Elemento con sequence directamente (sin complexType wrapper)
-                    object[targetNamespace + ':' + item.name!] = complexTypeToObject(item, currentNamespaces, object, targetNamespace);
+                    object[targetNamespace + ':' + item.name!] = complexTypeToObject(item, currentNamespaces, object, targetNamespace, isQualified);
                 }
             }
         } else {
             const elementComplexType = getComplexTypeNode(elementNode as XmlNode);
             if (elementComplexType !== undefined) {
                 // Elemento con complexType inline
-                object[targetNamespace + ':' + (elementNode as XmlNode).name!] = complexTypeToObject(elementComplexType, currentNamespaces, object, targetNamespace);
+                object[targetNamespace + ':' + (elementNode as XmlNode).name!] = complexTypeToObject(elementComplexType, currentNamespaces, object, targetNamespace, isQualified);
             } else if (getSequenceNode(elementNode as XmlNode) !== undefined) {
                 // Elemento con sequence directamente (sin complexType wrapper)
-                object[targetNamespace + ':' + (elementNode as XmlNode).name!] = complexTypeToObject(elementNode as XmlNode, currentNamespaces, object, targetNamespace);
+                object[targetNamespace + ':' + (elementNode as XmlNode).name!] = complexTypeToObject(elementNode as XmlNode, currentNamespaces, object, targetNamespace, isQualified);
             }
         }
     }
@@ -705,6 +725,7 @@ export const complexTypesFromSchema = async (wsdlFile: string, node: XmlNode, na
 
 export const schemaToObject = (node: XmlNode, namespaces: Map<string, string>, complexTypes: ComplexTypes): any => {
     const object: any = {};
+    const isQualified = node.elementFormDefault === 'qualified';
     const elementNode = getElementNode(node);
     
     if (Array.isArray(elementNode)) {
@@ -718,9 +739,9 @@ export const schemaToObject = (node: XmlNode, namespaces: Map<string, string>, c
                     if (typeName) {
                         const fullName = node.targetNamespace ? `${node.targetNamespace}:${typeName}` : typeName;
                         if (item.type && complexTypes[item.type]) {
-                            object[fullName] = complexTypes[item.type];
+                            object[fullName] = { ...complexTypes[item.type], $qualified: isQualified };
                         } else {
-                            object[fullName] = { type: item.type || 'xsd:anyType' };
+                            object[fullName] = { type: item.type || 'xsd:anyType', $qualified: isQualified };
                         }
                     }
                 }
@@ -732,7 +753,7 @@ export const schemaToObject = (node: XmlNode, namespaces: Map<string, string>, c
             if (complexTypeNode !== undefined) {
                 // Construir el nombre completo con namespace
                 const fullName = node.targetNamespace ? `${node.targetNamespace}:${elementName}` : elementName;
-                object[fullName] = complexTypeToObject(complexTypeNode, namespaces, complexTypes, node.targetNamespace);
+                object[fullName] = complexTypeToObject(complexTypeNode, namespaces, complexTypes, node.targetNamespace, isQualified);
             } else if (item.type) {
                 // Elemento que referencia un tipo existente
                 const typeName = item.type;
@@ -744,16 +765,24 @@ export const schemaToObject = (node: XmlNode, namespaces: Map<string, string>, c
                 if (complexTypes[fullTypeName]) {
                     // El tipo existe en complexTypes, crear referencia
                     const fullElementName = node.targetNamespace ? `${node.targetNamespace}:${elementName}` : elementName;
-                    object[fullElementName] = complexTypes[fullTypeName];
+                    // El elemento tiene el $qualified del schema actual, pero su contenido interno
+                    // mantiene el $qualified del tipo referenciado
+                    // Crear un wrapper que preserve el namespace del elemento actual
+                    const typeContent = complexTypes[fullTypeName];
+                    object[fullElementName] = { 
+                        type: typeContent,  // El contenido interno mantiene su propio $qualified
+                        $qualified: isQualified,  // Este elemento específico usa el qualified del schema actual
+                        $namespace: node.targetNamespace  // El namespace del elemento es el del schema actual
+                    };
                 } else {
                     // Tipo simple o no encontrado
                     const fullElementName = node.targetNamespace ? `${node.targetNamespace}:${elementName}` : elementName;
-                    object[fullElementName] = { type: typeName };
+                    object[fullElementName] = { type: typeName, $qualified: isQualified };
                 }
             } else {
                 // Elemento sin tipo definido
                 const fullElementName = node.targetNamespace ? `${node.targetNamespace}:${elementName}` : elementName;
-                object[fullElementName] = { type: 'xsd:anyType' };
+                object[fullElementName] = { type: 'xsd:anyType', $qualified: isQualified };
             }
         }
     } else if (elementNode !== undefined) {
@@ -765,7 +794,7 @@ export const schemaToObject = (node: XmlNode, namespaces: Map<string, string>, c
             const complexTypeNode = getComplexTypeNode(element) || getComplexTypeNode(node);
             if (complexTypeNode !== undefined) {
                 const fullName = node.targetNamespace ? `${node.targetNamespace}:${elementName}` : elementName;
-                object[fullName] = complexTypeToObject(complexTypeNode, namespaces, complexTypes, node.targetNamespace);
+                object[fullName] = complexTypeToObject(complexTypeNode, namespaces, complexTypes, node.targetNamespace, isQualified);
             } else if (element.type) {
                 // Elemento que referencia un tipo
                 const typeName = element.type;
@@ -775,20 +804,27 @@ export const schemaToObject = (node: XmlNode, namespaces: Map<string, string>, c
                 
                 if (complexTypes[fullTypeName]) {
                     const fullElementName = node.targetNamespace ? `${node.targetNamespace}:${elementName}` : elementName;
-                    object[fullElementName] = complexTypes[fullTypeName];
+                    // El elemento tiene el $qualified del schema actual, pero su contenido interno
+                    // mantiene el $qualified del tipo referenciado
+                    const typeContent = complexTypes[fullTypeName];
+                    object[fullElementName] = { 
+                        type: typeContent,
+                        $qualified: isQualified,
+                        $namespace: node.targetNamespace
+                    };
                 } else {
                     const fullElementName = node.targetNamespace ? `${node.targetNamespace}:${elementName}` : elementName;
-                    object[fullElementName] = { type: typeName };
+                    object[fullElementName] = { type: typeName, $qualified: isQualified };
                 }
             } else {
                 const fullElementName = node.targetNamespace ? `${node.targetNamespace}:${elementName}` : elementName;
-                object[fullElementName] = { type: 'xsd:anyType' };
+                object[fullElementName] = { type: 'xsd:anyType', $qualified: isQualified };
             }
         }
     }
     
     // Si no encontramos elementos pero hay complexTypes, agregarlos también
-    const schemaKeys = Object.keys(object).filter(k => k !== '$namespace');
+    const schemaKeys = Object.keys(object).filter(k => k !== '$namespace' && k !== '$qualified');
     if (schemaKeys.length === 0 && Object.keys(complexTypes).length > 0) {
         // Agregar los complexTypes directamente al objeto
         for (const [typeName, typeObject] of Object.entries(complexTypes)) {
@@ -797,6 +833,7 @@ export const schemaToObject = (node: XmlNode, namespaces: Map<string, string>, c
     }
     
     object["$namespace"] = node.targetNamespace;
+    object["$qualified"] = isQualified;
     return object;
 };
 

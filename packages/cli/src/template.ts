@@ -26,11 +26,13 @@ interface TypeDefinition {
     type: string | TypeObject;
     maxOccurs?: string;
     minOccurs?: string;
+    $qualified?: boolean;
 }
 
 interface TypeObject {
-    [key: string]: TypeDefinition | string | undefined;
+    [key: string]: TypeDefinition | string | boolean | undefined;
     $namespace?: string;
+    $qualified?: boolean;
 }
 
 interface NamespaceInfo {
@@ -60,7 +62,7 @@ const stringSplitCache = new Map<string, string[]>();
 const filteredKeysCache = new WeakMap<TypeObject, string[]>();
 
 /**
- * Obtiene las claves de un objeto filtradas (sin NAMESPACE_KEY)
+ * Obtiene las claves de un objeto filtradas (sin NAMESPACE_KEY, $qualified, etc)
  * Cachea el resultado para evitar múltiples Object.keys() y filtros
  */
 function getFilteredKeys(obj: TypeObject | null | undefined): string[] {
@@ -70,7 +72,7 @@ function getFilteredKeys(obj: TypeObject | null | undefined): string[] {
         return filteredKeysCache.get(obj)!;
     }
     
-    const keys = Object.keys(obj).filter(key => key !== NAMESPACE_KEY);
+    const keys = Object.keys(obj).filter(key => key !== NAMESPACE_KEY && key !== '$qualified' && key !== '$base');
     filteredKeysCache.set(obj, keys);
     return keys;
 }
@@ -129,7 +131,7 @@ function getTypeModifier(propConfig?: TypeDefinition): string {
  */
 function createInterfacePropertyCode(prop: string, props: { type: TypeObject } & Record<string, any>): string {
     const childrenField = props.type[prop]!;
-    if (typeof childrenField === 'string') {
+    if (typeof childrenField === 'string' || typeof childrenField === 'boolean') {
         return `\t${toCamelCase(prop)}: string`;
     }
     const xmlSchemaType = extractXmlSchemaType(childrenField.type as string);
@@ -224,6 +226,7 @@ export interface CombinedNamespaceMappings {
 /**
  * Extrae todos los mappings de namespace en una sola pasada sobre los datos
  * Optimización: combina las tres extracciones (tags, prefixes, types) en una sola iteración
+ * Solo incluye namespaces qualified en prefixesMapping (para xmlns declarations)
  */
 export function extractAllNamespaceMappings(
     baseTypeName: string,
@@ -243,14 +246,21 @@ export function extractAllNamespaceMappings(
         throw new Error(`El tipo ${baseTypeName} no tiene la propiedad $namespace definida`);
     }
     
+    // Verificar si el tipo base es qualified
+    const baseIsQualified = baseTypeObject.$qualified === true;
+    
     const baseNamespacePrefix = extractNamespacePrefix(baseNamespace);
     
     // Extraer nombre local del tipo base
     const baseTypeLocalName = extractLocalName(baseTypeName);
     
     // Inicializar mappings base (usar nombres locales para los tags)
-    tagsMapping[baseNamespacePrefix] = [baseTypeLocalName];
-    prefixesMapping[baseNamespacePrefix] = baseNamespace;
+    // Solo agregar al tagsMapping si es qualified
+    if (baseIsQualified) {
+        tagsMapping[baseNamespacePrefix] = [baseTypeLocalName];
+        prefixesMapping[baseNamespacePrefix] = baseNamespace;
+    }
+    
     typesMapping[baseTypeName] = {
         uri: baseNamespace,
         prefix: baseNamespacePrefix,
@@ -258,16 +268,19 @@ export function extractAllNamespaceMappings(
     
     const keys = getFilteredKeys(baseTypeObject);
     
-    // Función auxiliar recursiva para extraer tags anidados
+    // Función auxiliar recursiva para extraer tags anidados (solo si son qualified)
     const extractNestedTags = (typeObject: TypeObject): string[] => {
         const result: string[] = [];
         const nestedKeys = getFilteredKeys(typeObject);
+        const isQualified = typeObject.$qualified === true;
         
         for (const nestedKey of nestedKeys) {
             const nestedElement = typeObject[nestedKey]!;
-            // Siempre agregar el nombre local del tag actual
-            const tagLocalName = extractLocalName(nestedKey);
-            result.push(tagLocalName);
+            // Solo agregar el tag si es qualified
+            if (isQualified) {
+                const tagLocalName = extractLocalName(nestedKey);
+                result.push(tagLocalName);
+            }
             
             if (typeof nestedElement === 'object' && nestedElement !== null && typeof nestedElement.type === 'object') {
                 // También agregar tags anidados recursivamente
@@ -327,32 +340,46 @@ export function extractAllNamespaceMappings(
     // Una sola iteración sobre las claves principales
     for (const key of keys) {
         const element = baseTypeObject[key]!;
-        let namespace = key;
         // Extraer nombre local del tag
         const tagLocalName = extractLocalName(key);
-        const tagNames = [tagLocalName];
+        
+        // Verificar si el elemento es qualified
+        let elementIsQualified = false;
+        // Obtener el namespace del elemento (no del tipo interno)
+        let elementNamespace: string | undefined;
+        
+        if (typeof element === 'object' && element !== null) {
+            elementIsQualified = (element as any).$qualified === true;
+            // Usar el $namespace del propio elemento si existe
+            elementNamespace = (element as any).$namespace;
+        }
+        
+        // Usar el namespace del elemento, o el del baseType como fallback
+        const namespace = elementNamespace || baseNamespace;
+        
+        const tagNames = elementIsQualified ? [tagLocalName] : [];
         
         if (typeof element === 'object' && element !== null && typeof element.type === 'object') {
-            const elementNamespace = (element.type as TypeObject)[NAMESPACE_KEY];
-            if (elementNamespace) {
-                namespace = elementNamespace;
-                const nestedTags = extractNestedTags(element.type as TypeObject);
-                tagNames.push(...nestedTags);
-            }
+            // Los tags anidados pueden tener un namespace diferente (del tipo interno)
+            const nestedTags = extractNestedTags(element.type as TypeObject);
+            tagNames.push(...nestedTags);
         }
         
         const namespacePrefix = extractNamespacePrefix(namespace);
         
-        // Actualizar tagsMapping (usar nombres locales)
-        if (tagsMapping[namespacePrefix] === undefined) {
-            tagsMapping[namespacePrefix] = tagNames;
-        } else {
-            tagsMapping[namespacePrefix]!.push(...tagNames);
-        }
-        
-        // Actualizar prefixesMapping
-        if (prefixesMapping[namespacePrefix] === undefined) {
-            prefixesMapping[namespacePrefix] = namespace;
+        // Solo agregar al tagsMapping y prefixesMapping si hay tags qualified
+        if (tagNames.length > 0) {
+            // Actualizar tagsMapping (usar nombres locales)
+            if (tagsMapping[namespacePrefix] === undefined) {
+                tagsMapping[namespacePrefix] = tagNames;
+            } else {
+                tagsMapping[namespacePrefix]!.push(...tagNames);
+            }
+            
+            // Actualizar prefixesMapping
+            if (prefixesMapping[namespacePrefix] === undefined) {
+                prefixesMapping[namespacePrefix] = namespace;
+            }
         }
     }
     
@@ -373,16 +400,50 @@ export function extractAllNamespaceMappings(
 }
 
 /**
- * Genera el código de declaraciones de namespaces
- */
-/**
  * Obtiene el prefijo de namespace para un elemento
+ * Usa el namespace del propio elemento si tiene uno definido
  */
-function getNamespacePrefix(namespacesTypeMapping: NamespaceTypesMapping, baseNamespacePrefix: string, key: string, parentKey: string | null): string {
+function getNamespacePrefix(namespacesTypeMapping: NamespaceTypesMapping, baseNamespacePrefix: string, key: string, parentKey: string | null, elementObject?: TypeDefinition): string {
+    // Si el elemento tiene su propio $namespace, usarlo para determinar el prefijo
+    // IMPORTANTE: Usar solo el $namespace del elemento, no del tipo interno
+    // El tipo interno puede tener un namespace diferente (del schema donde está definido el tipo)
+    // pero el elemento usa el namespace del schema donde está definido el elemento
+    if (elementObject && typeof elementObject === 'object') {
+        const elemNs = (elementObject as any).$namespace;
+        if (typeof elemNs === 'string') {
+            return extractNamespacePrefix(elemNs);
+        }
+    }
+    
+    // Fallback al mapping existente
     if (parentKey !== null) {
         return namespacesTypeMapping[parentKey]?.prefix ?? baseNamespacePrefix;
     }
     return namespacesTypeMapping[key]?.prefix ?? baseNamespacePrefix;
+}
+
+/**
+ * Determina si un elemento debe tener prefijo de namespace
+ * Basado en el atributo elementFormDefault del schema
+ */
+function shouldHavePrefix(elementObject: TypeDefinition | TypeObject | undefined): boolean {
+    if (!elementObject || typeof elementObject !== 'object') return false;
+    
+    // Si el elemento tiene $qualified definido, usarlo
+    if ('$qualified' in elementObject && typeof elementObject.$qualified === 'boolean') {
+        return elementObject.$qualified;
+    }
+    
+    // Si el elemento tiene un type que es objeto, verificar si tiene $qualified
+    if ('type' in elementObject && typeof elementObject.type === 'object' && elementObject.type !== null) {
+        const typeObj = elementObject.type as TypeObject;
+        if ('$qualified' in typeObj && typeof typeObj.$qualified === 'boolean') {
+            return typeObj.$qualified;
+        }
+    }
+    
+    // Por defecto, no agregar prefijo (unqualified)
+    return false;
 }
 
 /**
@@ -394,18 +455,27 @@ function generateXmlPropertyCode(
     key: string,
     elementObject: TypeDefinition,
     parentKey: string | null = null,
-    propertyPath: string = ''
+    propertyPath: string = '',
+    parentIsQualified: boolean = true // El padre (root element) siempre es qualified
 ): string {
     const namespacePrefix = getNamespacePrefix(
         namespacesTypeMapping,
         baseNamespacePrefix,
         key,
-        parentKey
+        parentKey,
+        elementObject
     );
     
     // Extraer nombre local del tag
     const tagLocalName = extractLocalName(key);
     const tagCamelCase = toCamelCase(tagLocalName);
+    
+    // Determinar si este elemento debe tener prefijo
+    const isQualified = shouldHavePrefix(elementObject);
+    
+    // Generar el tag con o sin prefijo según $qualified
+    const openTag = isQualified ? `<${namespacePrefix}.${tagLocalName}>` : `<${tagLocalName}>`;
+    const closeTag = isQualified ? `</${namespacePrefix}.${tagLocalName}>` : `</${tagLocalName}>`;
     
     // Detectar si es un array basándose en maxOccurs
     const isArray = typeof elementObject === 'object' && elementObject !== null && 
@@ -447,19 +517,27 @@ function generateXmlPropertyCode(
                                 elementKey,
                                 nestedElement as TypeDefinition,
                                 key,
-                                'item' // Usar 'item' directamente en lugar de la ruta completa con índice
+                                'item', // Usar 'item' directamente en lugar de la ruta completa con índice
+                                isQualified
                             );
                         } else {
                             // Tipo simple dentro del array - usar 'item' directamente
                             const nestedTagLocalName = extractLocalName(elementKey);
                             const nestedTagCamelCase = toCamelCase(nestedTagLocalName);
-                            const nestedNamespacePrefix = getNamespacePrefix(
-                                namespacesTypeMapping,
-                                baseNamespacePrefix,
-                                elementKey,
-                                key
-                            );
-                            return `<${nestedNamespacePrefix}.${nestedTagLocalName}>{item.${nestedTagCamelCase}}</${nestedNamespacePrefix}.${nestedTagLocalName}>`;
+                            const nestedIsQualified = shouldHavePrefix(nestedElement as TypeDefinition);
+                            
+                            if (nestedIsQualified) {
+                                const nestedNamespacePrefix = getNamespacePrefix(
+                                    namespacesTypeMapping,
+                                    baseNamespacePrefix,
+                                    elementKey,
+                                    key,
+                                    nestedElement as TypeDefinition
+                                );
+                                return `<${nestedNamespacePrefix}.${nestedTagLocalName}>{item.${nestedTagCamelCase}}</${nestedNamespacePrefix}.${nestedTagLocalName}>`;
+                            } else {
+                                return `<${nestedTagLocalName}>{item.${nestedTagCamelCase}}</${nestedTagLocalName}>`;
+                            }
                         }
                     }
                     return '';
@@ -468,9 +546,9 @@ function generateXmlPropertyCode(
                 .join('\n');
             
             return `{props.${currentPropertyPath}.map((item, i) => (
-    <${namespacePrefix}.${tagLocalName}>
+    ${openTag}
     ${nestedProperties}
-    </${namespacePrefix}.${tagLocalName}>
+    ${closeTag}
 ))}`;
         } else {
             // No es un array, generar código normal
@@ -484,7 +562,8 @@ function generateXmlPropertyCode(
                             elementKey,
                             nestedElement as TypeDefinition,
                             key,
-                            currentPropertyPath
+                            currentPropertyPath,
+                            isQualified
                         );
                     }
                     return '';
@@ -492,14 +571,14 @@ function generateXmlPropertyCode(
                 .filter(Boolean)
                 .join('\n');
             
-            return `<${namespacePrefix}.${tagLocalName}>
+            return `${openTag}
     ${nestedProperties}
-    </${namespacePrefix}.${tagLocalName}>`;
+    ${closeTag}`;
         }
     }
     
     // Para tipos simples, usar la ruta completa de la propiedad
-    return `<${namespacePrefix}.${tagLocalName}>{props.${currentPropertyPath}}</${namespacePrefix}.${tagLocalName}>`;
+    return `${openTag}{props.${currentPropertyPath}}${closeTag}`;
 }
 
 /**
@@ -509,6 +588,9 @@ export function generateXmlBodyCode(baseNamespacePrefix: string, namespacesTypeM
     const keys = getFilteredKeys(baseTypeObject);
     // Extraer nombre local del tipo base
     const baseTypeLocalName = extractLocalName(baseTypeName);
+    
+    // El elemento raíz siempre debe tener prefijo (es un elemento global)
+    // Los elementos hijos dependen de $qualified
     
     // Determinar la ruta inicial de propiedades basándose en la interfaz de props
     // Si hay una propiedad principal en la interfaz de props, usarla como punto de partida
@@ -535,7 +617,8 @@ export function generateXmlBodyCode(baseNamespacePrefix: string, namespacesTypeM
                     key,
                     element as TypeDefinition,
                     null,
-                    propertyPath
+                    propertyPath,
+                    true // El padre (root element) siempre es qualified
                 );
             }
             return '';
@@ -543,6 +626,7 @@ export function generateXmlBodyCode(baseNamespacePrefix: string, namespacesTypeM
         .filter(Boolean)
         .join('\n');
     
+    // El elemento raíz siempre tiene prefijo (es un elemento global, no local)
     return `<${baseNamespacePrefix}.${baseTypeLocalName}>
     ${properties}
 </${baseNamespacePrefix}.${baseTypeLocalName}>`;
@@ -592,11 +676,15 @@ export function prepareSimpleTypesData(typeObject: TypeObject, xmlSchemaUri: str
         .filter(key => {
             if (key === NAMESPACE_KEY) return false;
             const typeDef = typeObject[key]!;
+            if (typeof typeDef === 'boolean') return false;
             return typeof typeDef === 'string' || (typeof typeDef === 'object' && typeDef !== null && typeof typeDef.type === 'string' && typeDef.type.includes(xmlSchemaUri));
         })
         .map(key => {
             const typeDef = typeObject[key]!;
-            const typeValue = typeof typeDef === 'string' ? typeDef : (typeDef.type as string);
+            if (typeof typeDef === 'boolean') {
+                return { name: key, tsType: 'boolean' };
+            }
+            const typeValue = typeof typeDef === 'string' ? typeDef : ((typeDef as TypeDefinition).type as string);
             return {
                 name: key,
                 tsType: 'string',
@@ -686,10 +774,8 @@ export function prepareInterfaceData(interfaceName: string, interfaceDefinition:
                         
                         if (matchingTypeKey) {
                             propertyType = toPascalCase(extractLocalName(matchingTypeKey));
-                            console.log(`[DEBUG] prepareInterfaceData: Tipo anidado '${prop}' resuelto a '${propertyType}' desde allTypesForInterfaces`);
                         } else {
                             propertyType = propPascalCase; // Fallback al nombre de la propiedad
-                            console.log(`[DEBUG] prepareInterfaceData: Tipo anidado '${prop}' no encontrado en allTypesForInterfaces, usando '${propertyType}'`);
                         }
                     } else {
                         propertyType = propPascalCase; // Fallback al nombre de la propiedad
@@ -773,20 +859,16 @@ function extractNestedComplexTypes(
  * Prepara datos de todas las interfaces para el template
  */
 export function prepareInterfacesData(requestTypeObject: TypeObject, namespaceKey: string, xmlSchemaUri: string, allTypesForInterfaces?: TypeObject): InterfaceData[] {
-    console.log('[DEBUG] prepareInterfacesData: Iniciando generación de interfaces...');
     const visited = new Set<string>();
     const interfaces: InterfaceData[] = [];
     
     const allKeys = Object.keys(requestTypeObject).filter(k => k !== namespaceKey);
-    console.log(`[DEBUG] prepareInterfacesData: Total de claves en requestTypeObject: ${allKeys.length}`);
-    console.log(`[DEBUG] prepareInterfacesData: Claves encontradas: ${allKeys.slice(0, 10).join(', ')}${allKeys.length > 10 ? '...' : ''}`);
     
     // Extraer todos los tipos complejos anidados recursivamente
-    console.log('[DEBUG] prepareInterfacesData: Extrayendo tipos complejos anidados...');
-    const allComplexTypes = extractNestedComplexTypes(requestTypeObject, namespaceKey, xmlSchemaUri, visited);
-    console.log(`[DEBUG] prepareInterfacesData: Tipos complejos anidados encontrados: ${allComplexTypes.length}`);
+    // Usar un Set separado para evitar duplicados durante la extracción, pero no afectar visited aún
+    const extractionVisited = new Set<string>();
+    const allComplexTypes = extractNestedComplexTypes(requestTypeObject, namespaceKey, xmlSchemaUri, extractionVisited);
     if (allComplexTypes.length > 0) {
-        console.log(`[DEBUG] prepareInterfacesData: Lista de tipos anidados: ${allComplexTypes.map(t => t.interfaceName).join(', ')}`);
     }
     
     // También incluir los tipos del nivel superior que son tipos complejos
@@ -806,51 +888,25 @@ export function prepareInterfacesData(requestTypeObject: TypeObject, namespaceKe
             return false;
         });
     
-    console.log(`[DEBUG] prepareInterfacesData: Tipos del nivel superior encontrados: ${topLevelKeys.length}`);
     if (topLevelKeys.length > 0) {
-        console.log(`[DEBUG] prepareInterfacesData: Lista de tipos nivel superior: ${topLevelKeys.map(k => extractLocalName(k)).join(', ')}`);
     }
     
     // Procesar tipos del nivel superior
     for (const key of topLevelKeys) {
         const localName = extractLocalName(key);
-        if (!visited.has(localName)) {
-            visited.add(localName);
-            console.log(`[DEBUG] prepareInterfacesData: Generando interfaz para tipo nivel superior: ${localName}`);
-            interfaces.push(prepareInterfaceData(localName, requestTypeObject[key] as any, allTypesForInterfaces));
-            
-            // También buscar tipos anidados dentro de este tipo del nivel superior
-            const nestedTypes = extractNestedComplexTypes(
-                (requestTypeObject[key] as any).type as TypeObject,
-                namespaceKey,
-                xmlSchemaUri,
-                visited
-            );
-            for (const { interfaceName, typeObject } of nestedTypes) {
-                if (!visited.has(interfaceName)) {
-                    visited.add(interfaceName);
-                    console.log(`[DEBUG] prepareInterfacesData: Generando interfaz para tipo anidado: ${interfaceName}`);
-                    interfaces.push(prepareInterfaceData(interfaceName, { type: typeObject } as any, allTypesForInterfaces));
-                }
-            }
+        // Convertir a PascalCase para comparación consistente
+        const interfaceName = toPascalCase(localName);
+        if (!visited.has(interfaceName) && !interfaces.some(i => i.name === interfaceName)) {
+            visited.add(interfaceName);
+            interfaces.push(prepareInterfaceData(interfaceName, requestTypeObject[key] as any, allTypesForInterfaces));
         }
     }
     
     // Procesar tipos complejos anidados encontrados recursivamente
     for (const { interfaceName, typeObject } of allComplexTypes) {
-        if (!visited.has(interfaceName)) {
+        if (!visited.has(interfaceName) && !interfaces.some(i => i.name === interfaceName)) {
             visited.add(interfaceName);
-            console.log(`[DEBUG] prepareInterfacesData: Generando interfaz para tipo complejo anidado: ${interfaceName}`);
             interfaces.push(prepareInterfaceData(interfaceName, { type: typeObject } as any, allTypesForInterfaces));
-        } else {
-            console.log(`[DEBUG] prepareInterfacesData: Tipo ${interfaceName} ya procesado (omitido)`);
-            // Aunque esté marcado como visitado, verificar si realmente se generó la interfaz
-            // Si no está en la lista de interfaces generadas, procesarlo de nuevo
-            const alreadyGenerated = interfaces.some(i => i.name === interfaceName);
-            if (!alreadyGenerated) {
-                console.log(`[DEBUG] prepareInterfacesData: Tipo ${interfaceName} estaba marcado como visitado pero no se generó, generándolo ahora`);
-                interfaces.push(prepareInterfaceData(interfaceName, { type: typeObject } as any, allTypesForInterfaces));
-            }
         }
     }
     
@@ -858,32 +914,34 @@ export function prepareInterfacesData(requestTypeObject: TypeObject, namespaceKe
     // pero que no fueron procesados como tipos del nivel superior (porque tienen nombres completos con namespace)
     const remainingKeys = Object.keys(requestTypeObject)
         .filter(key => {
-            if (key === namespaceKey) return false;
+            if (key === namespaceKey || key === '$qualified') return false;
             // Solo procesar si es un complexType (tiene estructura de tipo complejo)
             const typeDef = requestTypeObject[key]!;
             if (typeof typeDef === 'object' && typeDef !== null) {
                 // Si es un objeto con type que es objeto, es un tipo complejo
                 if ('type' in typeDef && typeof (typeDef as any).type === 'object') {
                     const localName = extractLocalName(key);
-                    return !visited.has(localName);
+                    const interfaceName = toPascalCase(localName);
+                    // Verificar usando PascalCase y también si ya existe la interfaz
+                    return !visited.has(interfaceName) && !interfaces.some(i => i.name === interfaceName);
                 }
                 // Si es directamente un tipo complejo (sin wrapper type), también procesarlo
-                const keys = Object.keys(typeDef).filter(k => k !== '$namespace' && k !== '$base');
+                const keys = Object.keys(typeDef).filter(k => k !== '$namespace' && k !== '$base' && k !== '$qualified');
                 if (keys.length > 0) {
                     const localName = extractLocalName(key);
-                    return !visited.has(localName);
+                    const interfaceName = toPascalCase(localName);
+                    return !visited.has(interfaceName) && !interfaces.some(i => i.name === interfaceName);
                 }
             }
             return false;
         });
     
-    console.log(`[DEBUG] prepareInterfacesData: Tipos restantes a procesar: ${remainingKeys.length}`);
     for (const key of remainingKeys) {
         const localName = extractLocalName(key);
-        if (!visited.has(localName)) {
-            visited.add(localName);
+        const interfaceName = toPascalCase(localName);
+        if (!visited.has(interfaceName) && !interfaces.some(i => i.name === interfaceName)) {
+            visited.add(interfaceName);
             const typeDef = requestTypeObject[key]!;
-            console.log(`[DEBUG] prepareInterfacesData: Generando interfaz para tipo restante: ${localName}`);
             
             // Preparar la estructura correcta para prepareInterfaceData
             if (typeof typeDef === 'object' && typeDef !== null && 'type' in typeDef && typeof (typeDef as any).type === 'object') {
@@ -898,19 +956,21 @@ export function prepareInterfacesData(requestTypeObject: TypeObject, namespaceKe
     // IMPORTANTE: También procesar tipos en allTypesForInterfaces que no están en requestTypeObject
     // Esto asegura que se generen interfaces para tipos como PlanTO que están referenciados pero no directamente en requestTypeObject
     if (allTypesForInterfaces) {
-        const allTypesKeys = Object.keys(allTypesForInterfaces).filter(k => k !== namespaceKey && k !== '$namespace');
+        const allTypesKeys = Object.keys(allTypesForInterfaces).filter(k => 
+            k !== namespaceKey && k !== '$namespace' && k !== '$qualified' && k !== '$base'
+        );
         const missingKeys = allTypesKeys.filter(key => {
             const localName = extractLocalName(key);
-            return !visited.has(localName);
+            const interfaceName = toPascalCase(localName);
+            return !visited.has(interfaceName) && !interfaces.some(i => i.name === interfaceName);
         });
         
-        console.log(`[DEBUG] prepareInterfacesData: Tipos en allTypesForInterfaces no procesados: ${missingKeys.length}`);
         for (const key of missingKeys) {
             const localName = extractLocalName(key);
-            if (!visited.has(localName)) {
-                visited.add(localName);
+            const interfaceName = toPascalCase(localName);
+            if (!visited.has(interfaceName) && !interfaces.some(i => i.name === interfaceName)) {
+                visited.add(interfaceName);
                 const typeDef = allTypesForInterfaces[key]!;
-                console.log(`[DEBUG] prepareInterfacesData: Generando interfaz para tipo en allTypesForInterfaces: ${localName}`);
                 
                 // Verificar que sea un tipo complejo antes de procesarlo
                 if (typeof typeDef === 'object' && typeDef !== null) {
@@ -933,9 +993,7 @@ export function prepareInterfacesData(requestTypeObject: TypeObject, namespaceKe
         }
     }
     
-    console.log(`[DEBUG] prepareInterfacesData: Total de interfaces generadas: ${interfaces.length}`);
     if (interfaces.length > 0) {
-        console.log(`[DEBUG] prepareInterfacesData: Lista de interfaces: ${interfaces.map(i => i.name).join(', ')}`);
     }
     
     return interfaces;
@@ -950,13 +1008,11 @@ function resolveTypeName(
     propName: string,
     allTypesForInterfaces?: TypeObject
 ): string {
-    console.log(`[DEBUG] resolveTypeName: Resolviendo tipo '${referencedType}' para propiedad '${propName}'`);
     
     // Verificar primero si es un tipo simple de XML Schema
     // Si referencedType contiene "xsd:" o "http://www.w3.org/2001/XMLSchema", es un tipo simple
     const isXsdType = referencedType.includes('xsd:');
     const isXmlSchemaType = referencedType.includes('http://www.w3.org/2001/XMLSchema');
-    console.log(`[DEBUG] resolveTypeName: isXsdType=${isXsdType}, isXmlSchemaType=${isXmlSchemaType}`);
     
     if (isXsdType || isXmlSchemaType) {
         // Extraer el nombre del tipo correctamente
@@ -971,10 +1027,8 @@ function resolveTypeName(
         }
         
         if (XML_SCHEMA_TYPES[xmlSchemaType]) {
-            console.log(`[DEBUG] resolveTypeName: '${referencedType}' es un tipo simple XML Schema (${xmlSchemaType}) -> '${XML_SCHEMA_TYPES[xmlSchemaType]}'`);
             return XML_SCHEMA_TYPES[xmlSchemaType];
         } else {
-            console.log(`[DEBUG] resolveTypeName: '${referencedType}' parece ser XML Schema pero tipo '${xmlSchemaType}' no está mapeado, usando 'string' como fallback`);
             return 'string'; // Fallback para tipos XML Schema no mapeados
         }
     }
@@ -1018,16 +1072,13 @@ function resolveTypeName(
         if (matchingTypeKey) {
             // Usar el nombre local del tipo encontrado en PascalCase
             const resolvedName = toPascalCase(extractLocalName(matchingTypeKey));
-            console.log(`[DEBUG] resolveTypeName: '${referencedType}' encontrado como '${matchingTypeKey}' -> '${resolvedName}'`);
             return resolvedName;
         } else {
-            console.log(`[DEBUG] resolveTypeName: '${referencedType}' no encontrado en allTypesForInterfaces. Claves disponibles: ${Object.keys(allTypesForInterfaces).slice(0, 5).join(', ')}...`);
         }
     }
     
     // Si no se encuentra, usar el nombre de la propiedad en PascalCase como fallback
     const fallbackName = toPascalCase(propName);
-    console.log(`[DEBUG] resolveTypeName: Usando fallback '${fallbackName}' para '${referencedType}'`);
     return fallbackName;
 }
 

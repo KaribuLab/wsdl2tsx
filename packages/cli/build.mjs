@@ -1,4 +1,9 @@
 import { build } from "esbuild";
+import { cpSync, mkdirSync } from "fs";
+import { dirname } from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 await build({
   entryPoints: ["src/cli.ts"],
@@ -14,3 +19,7 @@ await build({
   },
   external: ["@karibulab/wsdl2tsx-runtime", "axios"]
 });
+
+// Copy templates to dist
+mkdirSync("dist/templates", { recursive: true });
+cpSync("src/templates", "dist/templates", { recursive: true });

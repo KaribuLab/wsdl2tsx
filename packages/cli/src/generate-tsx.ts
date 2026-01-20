@@ -271,10 +271,7 @@ export async function generateTsxFromWsdl(wsdlPath: string, outDir: string): Pro
     
     // Incluir todos los complexTypes referenciados en el requestTypeObject
     // Esto asegura que se generen interfaces para tipos como CodigoPlanListTO que están referenciados
-    console.log(`[DEBUG] RequestType encontrado: ${requestType}`);
-    console.log(`[DEBUG] Total de complexTypes disponibles: ${Object.keys(allComplexTypes).length}`);
     if (Object.keys(allComplexTypes).length > 0) {
-        console.log(`[DEBUG] ComplexTypes disponibles: ${Object.keys(allComplexTypes).slice(0, 10).join(', ')}${Object.keys(allComplexTypes).length > 10 ? '...' : ''}`);
     }
     
     const allTypesForInterfaces: any = { ...requestTypeObject };
@@ -295,18 +292,15 @@ export async function generateTsxFromWsdl(wsdlPath: string, outDir: string): Pro
                         k.split(':').pop() === typeValue.split(':').pop()
                     );
                     if (matchingType && !found.has(matchingType)) {
-                        console.log(`${indent}[DEBUG] Tipo referenciado encontrado: ${typeValue} -> ${matchingType}`);
                         found.add(matchingType);
                         // Buscar recursivamente dentro del tipo encontrado
                         if (allComplexTypes[matchingType]) {
                             findReferencedTypes(allComplexTypes[matchingType], found, depth + 1);
                         }
                     } else if (matchingType && found.has(matchingType)) {
-                        console.log(`${indent}[DEBUG] Tipo ya procesado (omitido): ${matchingType}`);
                     }
                 } else if (typeof typeValue === 'object' && typeValue !== null) {
                     // Tipo complejo anidado, buscar recursivamente
-                    console.log(`${indent}[DEBUG] Tipo complejo anidado encontrado en propiedad: ${key}`);
                     findReferencedTypes(typeValue, found, depth + 1);
                 }
             }
@@ -314,33 +308,25 @@ export async function generateTsxFromWsdl(wsdlPath: string, outDir: string): Pro
         return found;
     };
     
-    console.log('[DEBUG] Buscando tipos referenciados en requestTypeObject...');
     const referencedTypeNames = findReferencedTypes(requestTypeObject);
-    console.log(`[DEBUG] Tipos referenciados encontrados (como strings): ${referencedTypeNames.size}`);
     if (referencedTypeNames.size > 0) {
-        console.log(`[DEBUG] Lista de tipos referenciados: ${Array.from(referencedTypeNames).join(', ')}`);
     }
     
     // Agregar tipos referenciados encontrados como strings
     for (const typeName of referencedTypeNames) {
         if (!allTypesForInterfaces[typeName] && allComplexTypes[typeName]) {
-            console.log(`[DEBUG] Agregando tipo referenciado a allTypesForInterfaces: ${typeName}`);
             allTypesForInterfaces[typeName] = allComplexTypes[typeName];
         }
     }
     
     // IMPORTANTE: Incluir TODOS los complexTypes que están en allComplexTypes
     // porque algunos pueden estar referenciados indirectamente o expandidos en la estructura
-    console.log('[DEBUG] Agregando todos los complexTypes disponibles a allTypesForInterfaces...');
     for (const [typeName, typeDef] of Object.entries(allComplexTypes)) {
         if (!allTypesForInterfaces[typeName]) {
-            console.log(`[DEBUG] Agregando complexType disponible: ${typeName}`);
             allTypesForInterfaces[typeName] = typeDef;
         }
     }
     
-    console.log(`[DEBUG] Total de tipos en allTypesForInterfaces: ${Object.keys(allTypesForInterfaces).filter(k => k !== '$namespace').length}`);
-    console.log(`[DEBUG] Tipos en allTypesForInterfaces: ${Object.keys(allTypesForInterfaces).filter(k => k !== '$namespace').slice(0, 10).join(', ')}${Object.keys(allTypesForInterfaces).filter(k => k !== '$namespace').length > 10 ? '...' : ''}`);
     
     // Extraer todos los mappings de namespace en una sola pasada (optimización)
     const namespaceMappings = extractAllNamespaceMappings(requestType, requestTypeObject);
@@ -349,7 +335,6 @@ export async function generateTsxFromWsdl(wsdlPath: string, outDir: string): Pro
     const namespacesTypeMapping = namespaceMappings.typesMapping;
     const baseNamespacePrefix = namespacesTypeMapping[requestType]!.prefix;
     
-    console.log(`[DEBUG] Tipos en allTypesForInterfaces antes de generar interfaces: ${Object.keys(allTypesForInterfaces).filter(k => k !== '$namespace').join(', ')}`);
     
     // Preparar datos estructurados para el template Handlebars
     // IMPORTANTE: Para propsInterface usar solo requestTypeObject (no allTypesForInterfaces)
@@ -365,9 +350,7 @@ export async function generateTsxFromWsdl(wsdlPath: string, outDir: string): Pro
         allTypesForInterfaces // Pasar allTypesForInterfaces como parámetro adicional para interfaces
     );
     
-    console.log(`[DEBUG] Total de interfaces en templateData: ${templateData.interfaces.length}`);
     if (templateData.interfaces.length > 0) {
-        console.log(`[DEBUG] Interfaces en templateData: ${templateData.interfaces.map(i => i.name).join(', ')}`);
     }
     
     // Compilar el template y generar el código

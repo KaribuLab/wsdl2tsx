@@ -10,7 +10,7 @@ export type {{pascalCase name}} = {{tsType}}
 
 export interface {{pascalCase requestType}}Props {
 {{#each propsInterface.properties}}
-	{{camelCase name}}: {{name}}{{#unless @last}},{{/unless}}
+	{{camelCase name}}: {{type}}{{#unless @last}},{{/unless}}
 {{/each}}
 }
 
