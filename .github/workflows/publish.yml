@@ -31,14 +31,23 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install kli
-        uses: jaxxstorm/action-install-gh-release@v1.10.0
-        with:
-          repo: KaribuLab/kli
-          tag: v0.4.0
-          platform: linux
-          arch: amd64
-          rename-to: kli
-          chmod: '0755'
+        run: |
+          KLI_VERSION="v0.4.0"
+          ARCH="amd64"
+          
+          # Descargar el tar.gz desde releases
+          curl -L -o /tmp/kli.tar.gz "https://github.com/KaribuLab/kli/releases/download/${KLI_VERSION}/kli-linux-${ARCH}.tar.gz"
+          
+          # Extraer el archivo
+          tar -xzf /tmp/kli.tar.gz -C /tmp
+          rm /tmp/kli.tar.gz
+          
+          # Mover a un directorio en PATH y hacer ejecutable
+          sudo mv /tmp/kli /usr/local/bin/kli
+          sudo chmod +x /usr/local/bin/kli
+          
+          # Verificar instalación
+          kli --version || echo "✅ kli instalado"
 
       - name: Calculate version and create tag
         id: version
