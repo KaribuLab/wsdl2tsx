@@ -1,6 +1,6 @@
 {
   "name": "@karibulab/wsdl2tsx",
-  "version": "1.0.0",
+  "version": "v0.4.0",
   "description": "Generador de código TSX desde archivos WSDL",
   "type": "module",
   "main": "dist/index.js",

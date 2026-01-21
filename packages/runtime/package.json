@@ -1,6 +1,6 @@
 {
   "name": "@karibulab/wsdl2tsx-runtime",
-  "version": "1.0.0",
+  "version": "v0.4.0",
   "description": "Runtime XML para código TSX generado desde WSDL",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
