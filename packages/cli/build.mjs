@@ -1,9 +1,6 @@
 import { build } from "esbuild";
 import { cpSync, mkdirSync } from "fs";
-import { dirname } from "path";
-import { fileURLToPath } from "url";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 await build({
   entryPoints: ["src/cli.ts"],
@@ -18,11 +15,13 @@ await build({
     js: '#!/usr/bin/env node'
   },
   external: [
-    "@karibulab/wsdl2tsx-runtime",
-    "axios",
-    "fast-xml-parser",
-    "handlebars"
-  ]
+    "@karibulab/wsdl2tsx-runtime"
+  ],
+  // Incluir todas las dependencias de npm en el bundle excepto las marcadas como external
+  packages: "bundle",
+  // Manejar mejor los módulos de Node.js que usan require() dinámico
+  mainFields: ["module", "main"],
+  conditions: ["import", "require", "node"]
 });
 
 // Copy templates to dist
