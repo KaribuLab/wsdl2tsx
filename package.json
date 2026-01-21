@@ -9,7 +9,8 @@
     "build": "npm run build --workspaces",
     "build:runtime": "npm run build --workspace=@karibulab/wsdl2tsx-runtime",
     "build:cli": "npm run build --workspace=@karibulab/wsdl2tsx",
-    "pack": "node scripts/pack.mjs"
+    "pack": "node scripts/pack.mjs",
+    "wsdl2tsx": "npm run build:cli && cd packages/cli && npm install && node dist/cli.js"
   },
   "repository": {
     "type": "git",

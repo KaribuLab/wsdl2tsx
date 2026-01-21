@@ -4,15 +4,14 @@
   "description": "Generador de código TSX desde archivos WSDL",
   "type": "module",
   "main": "dist/index.js",
-  "bin": {
-    "wsdl2tsx": "./dist/cli.js"
-  },
+  "bin": "./dist/cli.js",
   "files": [
     "dist"
   ],
   "scripts": {
     "build": "node build.mjs",
-    "dev": "node build.mjs --watch"
+    "dev": "node build.mjs --watch",
+    "start": "node dist/cli.js"
   },
   "dependencies": {
     "@karibulab/wsdl2tsx-runtime": "*",
