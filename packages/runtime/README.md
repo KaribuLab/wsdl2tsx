@@ -77,6 +77,40 @@ export function ConsultaCodigoPlan(props: ConsultaCodigoPlanProps) {
 }
 ```
 
+### Obteniendo el string XML
+
+Las funciones generadas retornan directamente un string XML. Puedes usarlas así:
+
+```tsx
+import { ConsultaCodigoPlan } from './consultaCodigoPlan';
+
+// Llamar a la función con los props
+const xmlString = ConsultaCodigoPlan({
+  codigoPlanList: {
+    planTO: {
+      codigoPlan: "12345",
+      tipoCliente: "FISICO"
+    }
+  }
+});
+
+// xmlString es un string XML válido que puedes usar directamente
+console.log(xmlString);
+// Output: <soap:Envelope xmlns:soap="...">...</soap:Envelope>
+
+// Enviar en una petición HTTP
+fetch('https://api.ejemplo.com/soap', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'text/xml; charset=utf-8',
+    'SOAPAction': 'consultaCodigoPlan'
+  },
+  body: xmlString
+});
+```
+
+**Nota importante:** El runtime convierte JSX directamente a strings XML. No necesitas renderizar ni procesar el resultado - las funciones retornan el XML como string listo para usar.
+
 ## Características
 
 - ✅ JSX personalizado para construir XML
