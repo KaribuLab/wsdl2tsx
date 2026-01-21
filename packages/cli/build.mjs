@@ -17,7 +17,7 @@ await build({
   banner: {
     js: '#!/usr/bin/env node'
   },
-  external: ["@karibulab/wsdl2tsx-runtime", "axios"]
+  external: ["@karibulab/wsdl2tsx-runtime"]
 });
 
 // Copy templates to dist
