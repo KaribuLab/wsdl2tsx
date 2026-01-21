@@ -56,7 +56,7 @@ export const loadXml = async (xmlPath: string): Promise<XmlNode> => {
         }
     } else {
         try {
-            xmlContentString = fs.readFileSync(xmlPath);
+        xmlContentString = fs.readFileSync(xmlPath);
         } catch (error: any) {
             throw new Error(`Error al leer archivo ${xmlPath}: ${error.message}`);
         }
@@ -69,8 +69,8 @@ export const loadXml = async (xmlPath: string): Promise<XmlNode> => {
     });
     
     try {
-        const xmlContentObject = parser.parse(xmlContentString.toString());
-        return xmlContentObject;
+    const xmlContentObject = parser.parse(xmlContentString.toString());
+    return xmlContentObject;
     } catch (error: any) {
         throw new Error(`Error al parsear XML desde ${xmlPath}: ${error.message}`);
     }
@@ -657,10 +657,10 @@ export const complexTypesFromSchema = async (wsdlFile: string, node: XmlNode, na
                 }
                 try {
                     const importedXsd = await loadXsd(wsdlFile, item.schemaLocation);
-                    const schemaNode = getSchemaNode(importedXsd);
+                const schemaNode = getSchemaNode(importedXsd);
                     if (schemaNode) {
                         const importedComplexTypes = await complexTypesFromSchema(wsdlFile, schemaNode, currentNamespaces);
-                        object = { ...object, ...importedComplexTypes };
+                object = { ...object, ...importedComplexTypes };
                     }
                 } catch (error: any) {
                     // Si falla al cargar el XSD externo, continuar sin él
@@ -673,10 +673,10 @@ export const complexTypesFromSchema = async (wsdlFile: string, node: XmlNode, na
             if (importNode.schemaLocation) {
                 try {
                     const importedXsd = await loadXsd(wsdlFile, importNode.schemaLocation);
-                    const schemaNode = getSchemaNode(importedXsd);
+            const schemaNode = getSchemaNode(importedXsd);
                     if (schemaNode) {
                         const importedComplexTypes = await complexTypesFromSchema(wsdlFile, schemaNode, currentNamespaces);
-                        object = { ...object, ...importedComplexTypes };
+            object = { ...object, ...importedComplexTypes };
                     }
                 } catch (error: any) {
                     // Si falla al cargar el XSD externo, continuar sin él
@@ -815,8 +815,8 @@ export const schemaToObject = (node: XmlNode, namespaces: Map<string, string>, c
                 } else {
                     const fullElementName = node.targetNamespace ? `${node.targetNamespace}:${elementName}` : elementName;
                     object[fullElementName] = { type: typeName, $qualified: isQualified };
-                }
-            } else {
+        }
+    } else {
                 const fullElementName = node.targetNamespace ? `${node.targetNamespace}:${elementName}` : elementName;
                 object[fullElementName] = { type: 'xsd:anyType', $qualified: isQualified };
             }
@@ -829,7 +829,7 @@ export const schemaToObject = (node: XmlNode, namespaces: Map<string, string>, c
         // Agregar los complexTypes directamente al objeto
         for (const [typeName, typeObject] of Object.entries(complexTypes)) {
             object[typeName] = typeObject;
-        }
+    }
     }
     
     object["$namespace"] = node.targetNamespace;

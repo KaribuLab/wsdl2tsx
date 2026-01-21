@@ -158,7 +158,7 @@ export async function generateTsxFromWsdl(wsdlPath: string, outDir: string): Pro
     // Recopilar namespaces de todos los schemas
     let allNamespaces = new Map(definitionsNamespaces);
     for (const schemaNode of schemaNodes) {
-        const schemaNamespaces = getNamespacesFromNode(schemaNode);
+    const schemaNamespaces = getNamespacesFromNode(schemaNode);
         allNamespaces = new Map([...allNamespaces, ...schemaNamespaces]);
     }
     

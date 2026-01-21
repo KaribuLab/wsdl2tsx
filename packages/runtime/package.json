@@ -40,5 +40,8 @@
     "wsdl",
     "runtime"
   ],
-  "license": "ISC"
+  "license": "ISC",
+  "publishConfig": {
+    "access": "public"
+  }
 }

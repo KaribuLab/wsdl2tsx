@@ -1,5 +1,5 @@
 {
-  "name": "wsdl2tsx",
+  "name": "@karibulab/wsdl2tsx",
   "version": "1.0.0",
   "description": "Generador de código TSX desde archivos WSDL",
   "type": "module",
@@ -32,6 +32,9 @@
     "code-generator"
   ],
   "license": "ISC",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/KaribuLab/wsdl2tsx.git"

@@ -1,0 +1,134 @@
+name: Publish to npm
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install kli
+        uses: jaxxstorm/action-install-gh-release@v1.10.0
+        with:
+          repo: KaribuLab/kli
+          tag: v0.4.0
+          platform: linux
+          arch: amd64
+          rename-to: kli
+          chmod: '0755'
+
+      - name: Calculate version and create tag
+        id: version
+        run: |
+          # Obtener tags existentes antes de ejecutar kli
+          git fetch --tags
+          TAGS_BEFORE=$(git tag | sort -V | tail -1 || echo "")
+          echo "📋 Tags existentes antes: $TAGS_BEFORE"
+          
+          # Ejecutar kli semver -t para crear tag automáticamente
+          # kli puede crear múltiples tags y mostrar información adicional
+          # La salida muestra las versiones calculadas y los comandos git ejecutados
+          echo "🔄 Ejecutando kli semver -t..."
+          kli semver -t 2>&1 || true
+          
+          # Obtener tags después de ejecutar kli y refrescar desde remoto
+          git fetch --tags
+          TAGS_AFTER=$(git tag | sort -V | tail -1 || echo "")
+          echo "📋 Tags existentes después: $TAGS_AFTER"
+          
+          # Verificar si se creó un tag nuevo
+          if [ "$TAGS_BEFORE" = "$TAGS_AFTER" ] || [ -z "$TAGS_AFTER" ]; then
+            echo "⚠️  No hay cambios que incrementen la versión. Saliendo..."
+            echo "should_publish=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # El tag más reciente es la nueva versión a publicar
+          VERSION_TAG="$TAGS_AFTER"
+          
+          # Extraer versión sin prefijo 'v'
+          VERSION_NUMBER=$(echo "$VERSION_TAG" | sed 's/^v//')
+          echo "version=$VERSION_NUMBER" >> $GITHUB_OUTPUT
+          echo "version_tag=$VERSION_TAG" >> $GITHUB_OUTPUT
+          echo "should_publish=true" >> $GITHUB_OUTPUT
+          echo "✅ Versión calculada: $VERSION_NUMBER (tag: $VERSION_TAG)"
+
+      - name: Check if should publish
+        if: steps.version.outputs.should_publish != 'true'
+        run: |
+          echo "No se creó un tag nuevo. No hay cambios que incrementen la versión."
+          exit 0
+
+      - name: Install dependencies
+        if: steps.version.outputs.should_publish == 'true'
+        run: npm ci
+
+      - name: Update package versions
+        if: steps.version.outputs.should_publish == 'true'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          
+          # Actualizar runtime package.json
+          cd packages/runtime
+          npm version $VERSION --no-git-tag-version
+          cd ../..
+          
+          # Actualizar CLI package.json
+          cd packages/cli
+          npm version $VERSION --no-git-tag-version
+          cd ../..
+          
+          # Actualizar dependencia del runtime a versión exacta
+          node scripts/update-runtime-dependency.mjs $VERSION
+          
+          echo "✅ Versiones actualizadas a $VERSION"
+
+      - name: Build packages
+        if: steps.version.outputs.should_publish == 'true'
+        run: npm run build
+
+      - name: Publish runtime to npm
+        if: steps.version.outputs.should_publish == 'true'
+        run: |
+          cd packages/runtime
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish CLI to npm
+        if: steps.version.outputs.should_publish == 'true'
+        run: |
+          cd packages/cli
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Push tag to remote
+        if: steps.version.outputs.should_publish == 'true'
+        run: |
+          TAG="${{ steps.version.outputs.version_tag }}"
+          git push origin "$TAG"
+          echo "✅ Tag $TAG publicado al repositorio remoto"
