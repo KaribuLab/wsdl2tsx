@@ -1,6 +1,5 @@
 import {
     loadXml,
-    getSchemaNode,
     getAllSchemaNodes,
     getTypesNode,
     getDefinitionsNode,
@@ -18,11 +17,7 @@ import { registerHandlebarsHelpers } from "./template-helpers.js";
 import Handlebars, { type TemplateDelegate } from "handlebars";
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
-
-// Obtener el directorio del archivo actual (para ES modules)
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// __dirname ya está disponible en CommonJS
 
 /**
  * Verifica si un tipo está referenciado en algún lugar del objeto de tipo
