@@ -43,7 +43,7 @@ jobs:
           rm /tmp/kli.tar.gz
           
           # Mover a un directorio en PATH y hacer ejecutable
-          sudo mv /tmp/kli /usr/local/bin/kli
+          sudo mv /tmp/kli-linux-${ARCH} /usr/local/bin/kli
           sudo chmod +x /usr/local/bin/kli
           
           # Verificar instalación
