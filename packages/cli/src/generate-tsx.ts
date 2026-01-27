@@ -8,6 +8,10 @@ import {
     schemaToObject,
     getRequestTypeFromDefinitions,
     getElementNode,
+    getPortTypeNode,
+    getOperationNodes,
+    getOperationName,
+    getRequestTypeFromOperation,
 } from "./wsdl.js";
 import {
     extractAllNamespaceMappings,
@@ -129,7 +133,11 @@ function compileTemplate(templateData: any): string {
 /**
  * Función principal que genera el archivo TSX desde un WSDL
  */
-export async function generateTsxFromWsdl(wsdlPath: string, outDir: string): Promise<void> {
+export async function generateTsxFromWsdl(
+    wsdlPath: string, 
+    outDir: string, 
+    operationName?: string
+): Promise<void> {
     const wsdlRoot = await loadXml(wsdlPath);
     const definitionsNode = getDefinitionsNode(wsdlRoot);
     if (!definitionsNode) {
@@ -223,125 +231,169 @@ export async function generateTsxFromWsdl(wsdlPath: string, outDir: string): Pro
         throw new Error(errorMsg);
     }
     
-    const requestType = getRequestTypeFromDefinitions(definitionsNode, schemaObject);
-    
-    if (!requestType) {
-        throw new Error('No se pudo determinar el tipo de solicitud desde las definiciones del WSDL');
+    // Obtener portType y operaciones
+    const portTypeNode = getPortTypeNode(definitionsNode);
+    if (!portTypeNode) {
+        throw new Error('No se encontró el nodo portType en las definiciones del WSDL');
     }
     
-    const requestTypeObject = schemaObject[requestType] as any;
-    
-    if (!requestTypeObject) {
-        throw new Error(`No se encontró el objeto de tipo ${requestType} en el schema`);
+    const operationNodes = getOperationNodes(portTypeNode);
+    if (operationNodes.length === 0) {
+        throw new Error('No se encontraron operaciones en el portType');
     }
     
-    // Asegurar que el objeto tenga $namespace
-    if (!requestTypeObject['$namespace'] && schemaObject['$namespace']) {
-        requestTypeObject['$namespace'] = schemaObject['$namespace'];
+    // Filtrar operaciones si se especificó un nombre
+    const operationsToProcess = operationName 
+        ? operationNodes.filter(op => {
+            const opName = getOperationName(op);
+            return opName === operationName || opName.toLowerCase() === operationName.toLowerCase();
+        })
+        : operationNodes;
+    
+    if (operationName && operationsToProcess.length === 0) {
+        const availableOps = operationNodes.map(op => getOperationName(op)).join(', ');
+        throw new Error(
+            `No se encontró la operación '${operationName}'. Operaciones disponibles: ${availableOps || 'ninguna'}`
+        );
     }
     
-    if (!requestTypeObject['$namespace']) {
-        throw new Error(`El tipo ${requestType} no tiene namespace definido`);
-    }
-    
-    // Incluir todos los complexTypes referenciados en el requestTypeObject
-    // Esto asegura que se generen interfaces para tipos como CodigoPlanListTO que están referenciados
-    if (Object.keys(allComplexTypes).length > 0) {
-    }
-    
-    const allTypesForInterfaces: any = { ...requestTypeObject };
-    
-    // Función recursiva para encontrar todos los tipos referenciados
-    const findReferencedTypes = (obj: any, found: Set<string> = new Set(), depth: number = 0): Set<string> => {
-        const indent = '  '.repeat(depth);
-        for (const [key, value] of Object.entries(obj)) {
-            if (key === '$namespace' || key === '$base') continue;
-            
-            if (typeof value === 'object' && value !== null && 'type' in value) {
-                const typeValue = (value as any).type;
-                if (typeof typeValue === 'string') {
-                    // Buscar si este tipo está en allComplexTypes
-                    const matchingType = Object.keys(allComplexTypes).find(k => 
-                        k === typeValue || 
-                        k.endsWith(':' + typeValue.split(':').pop()) ||
-                        k.split(':').pop() === typeValue.split(':').pop()
-                    );
-                    if (matchingType && !found.has(matchingType)) {
-                        found.add(matchingType);
-                        // Buscar recursivamente dentro del tipo encontrado
-                        if (allComplexTypes[matchingType]) {
-                            findReferencedTypes(allComplexTypes[matchingType], found, depth + 1);
+    // Función auxiliar para procesar una operación individual
+    const processOperation = (operationNode: XmlNode): void => {
+        const operationInfo = getRequestTypeFromOperation(operationNode, definitionsNode, schemaObject);
+        
+        if (!operationInfo) {
+            const opName = getOperationName(operationNode);
+            console.warn(`⚠️  Operación '${opName}' no tiene input, se omite`);
+            return;
+        }
+        
+        const { operationName: opName, requestType } = operationInfo;
+        
+        const requestTypeObject = schemaObject[requestType] as any;
+        
+        if (!requestTypeObject) {
+            throw new Error(`No se encontró el objeto de tipo ${requestType} en el schema para la operación '${opName}'`);
+        }
+        
+        // Asegurar que el objeto tenga $namespace
+        if (!requestTypeObject['$namespace'] && schemaObject['$namespace']) {
+            requestTypeObject['$namespace'] = schemaObject['$namespace'];
+        }
+        
+        if (!requestTypeObject['$namespace']) {
+            throw new Error(`El tipo ${requestType} no tiene namespace definido para la operación '${opName}'`);
+        }
+        
+        // Incluir todos los complexTypes referenciados en el requestTypeObject
+        // Esto asegura que se generen interfaces para tipos como CodigoPlanListTO que están referenciados
+        const allTypesForInterfaces: any = { ...requestTypeObject };
+        
+        // Función recursiva para encontrar todos los tipos referenciados
+        const findReferencedTypes = (obj: any, found: Set<string> = new Set(), depth: number = 0): Set<string> => {
+            const indent = '  '.repeat(depth);
+            for (const [key, value] of Object.entries(obj)) {
+                if (key === '$namespace' || key === '$base') continue;
+                
+                if (typeof value === 'object' && value !== null && 'type' in value) {
+                    const typeValue = (value as any).type;
+                    if (typeof typeValue === 'string') {
+                        // Buscar si este tipo está en allComplexTypes
+                        const matchingType = Object.keys(allComplexTypes).find(k => 
+                            k === typeValue || 
+                            k.endsWith(':' + typeValue.split(':').pop()) ||
+                            k.split(':').pop() === typeValue.split(':').pop()
+                        );
+                        if (matchingType && !found.has(matchingType)) {
+                            found.add(matchingType);
+                            // Buscar recursivamente dentro del tipo encontrado
+                            if (allComplexTypes[matchingType]) {
+                                findReferencedTypes(allComplexTypes[matchingType], found, depth + 1);
+                            }
+                        } else if (matchingType && found.has(matchingType)) {
                         }
-                    } else if (matchingType && found.has(matchingType)) {
+                    } else if (typeof typeValue === 'object' && typeValue !== null) {
+                        // Tipo complejo anidado, buscar recursivamente
+                        findReferencedTypes(typeValue, found, depth + 1);
                     }
-                } else if (typeof typeValue === 'object' && typeValue !== null) {
-                    // Tipo complejo anidado, buscar recursivamente
-                    findReferencedTypes(typeValue, found, depth + 1);
                 }
             }
+            return found;
+        };
+        
+        const referencedTypeNames = findReferencedTypes(requestTypeObject);
+        
+        // Agregar tipos referenciados encontrados como strings
+        for (const typeName of referencedTypeNames) {
+            if (!allTypesForInterfaces[typeName] && allComplexTypes[typeName]) {
+                allTypesForInterfaces[typeName] = allComplexTypes[typeName];
+            }
         }
-        return found;
+        
+        // IMPORTANTE: Incluir TODOS los complexTypes que están en allComplexTypes
+        // porque algunos pueden estar referenciados indirectamente o expandidos en la estructura
+        for (const [typeName, typeDef] of Object.entries(allComplexTypes)) {
+            if (!allTypesForInterfaces[typeName]) {
+                allTypesForInterfaces[typeName] = typeDef;
+            }
+        }
+        
+        // Extraer todos los mappings de namespace en una sola pasada (optimización)
+        const namespaceMappings = extractAllNamespaceMappings(requestType, requestTypeObject);
+        const namespacesTagsMapping = namespaceMappings.tagsMapping;
+        const namespacesPrefixMapping = namespaceMappings.prefixesMapping;
+        const namespacesTypeMapping = namespaceMappings.typesMapping;
+        const baseNamespacePrefix = namespacesTypeMapping[requestType]!.prefix;
+        
+        // Preparar datos estructurados para el template Handlebars
+        // IMPORTANTE: Para propsInterface usar solo requestTypeObject (no allTypesForInterfaces)
+        // Para interfaces usar allTypesForInterfaces para incluir todos los tipos referenciados
+        const templateData = prepareTemplateData(
+            requestType,
+            requestTypeObject, // Usar requestTypeObject original para propsInterface
+            namespacesTagsMapping,
+            namespacesPrefixMapping,
+            namespacesTypeMapping,
+            soapNamespaceURI,
+            baseNamespacePrefix,
+            allTypesForInterfaces // Pasar allTypesForInterfaces como parámetro adicional para interfaces
+        );
+        
+        // Compilar el template y generar el código
+        const generatedCode = compileTemplate(templateData);
+        
+        // Usar el nombre de la operación para el nombre del archivo
+        const typeNameForFile = opName;
+        
+        // Asegurar que el directorio de salida existe
+        if (!fs.existsSync(outDir)) {
+            fs.mkdirSync(outDir, { recursive: true });
+        }
+        
+        const outputPath = path.join(outDir, `${typeNameForFile}.tsx`);
+        fs.writeFileSync(outputPath, generatedCode);
+        console.log(`✅ Archivo ${typeNameForFile}.tsx generado correctamente en ${outDir}`);
     };
     
-    const referencedTypeNames = findReferencedTypes(requestTypeObject);
-    if (referencedTypeNames.size > 0) {
-    }
-    
-    // Agregar tipos referenciados encontrados como strings
-    for (const typeName of referencedTypeNames) {
-        if (!allTypesForInterfaces[typeName] && allComplexTypes[typeName]) {
-            allTypesForInterfaces[typeName] = allComplexTypes[typeName];
+    // Iterar sobre las operaciones a procesar
+    let generatedCount = 0;
+    for (const operationNode of operationsToProcess) {
+        try {
+            processOperation(operationNode);
+            generatedCount++;
+        } catch (error: any) {
+            const opName = getOperationName(operationNode);
+            console.error(`❌ Error al procesar operación '${opName}':`, error.message);
+            // Si se especificó una operación específica, lanzar el error
+            if (operationName) {
+                throw error;
+            }
+            // Si no, continuar con las demás operaciones
         }
     }
     
-    // IMPORTANTE: Incluir TODOS los complexTypes que están en allComplexTypes
-    // porque algunos pueden estar referenciados indirectamente o expandidos en la estructura
-    for (const [typeName, typeDef] of Object.entries(allComplexTypes)) {
-        if (!allTypesForInterfaces[typeName]) {
-            allTypesForInterfaces[typeName] = typeDef;
-        }
+    if (generatedCount === 0) {
+        throw new Error('No se generó ningún archivo. Verifica que las operaciones tengan input definido.');
     }
     
-    
-    // Extraer todos los mappings de namespace en una sola pasada (optimización)
-    const namespaceMappings = extractAllNamespaceMappings(requestType, requestTypeObject);
-    const namespacesTagsMapping = namespaceMappings.tagsMapping;
-    const namespacesPrefixMapping = namespaceMappings.prefixesMapping;
-    const namespacesTypeMapping = namespaceMappings.typesMapping;
-    const baseNamespacePrefix = namespacesTypeMapping[requestType]!.prefix;
-    
-    
-    // Preparar datos estructurados para el template Handlebars
-    // IMPORTANTE: Para propsInterface usar solo requestTypeObject (no allTypesForInterfaces)
-    // Para interfaces usar allTypesForInterfaces para incluir todos los tipos referenciados
-    const templateData = prepareTemplateData(
-        requestType,
-        requestTypeObject, // Usar requestTypeObject original para propsInterface
-        namespacesTagsMapping,
-        namespacesPrefixMapping,
-        namespacesTypeMapping,
-        soapNamespaceURI,
-        baseNamespacePrefix,
-        allTypesForInterfaces // Pasar allTypesForInterfaces como parámetro adicional para interfaces
-    );
-    
-    if (templateData.interfaces.length > 0) {
-    }
-    
-    // Compilar el template y generar el código
-    const generatedCode = compileTemplate(templateData);
-    
-    // Extraer solo el nombre local del tipo (después del último ':') para el nombre del archivo
-    const typeNameForFile = requestType.includes(':') 
-        ? requestType.split(':').pop()! 
-        : requestType;
-    
-    // Asegurar que el directorio de salida existe
-    if (!fs.existsSync(outDir)) {
-        fs.mkdirSync(outDir, { recursive: true });
-    }
-    
-    const outputPath = path.join(outDir, `${typeNameForFile}.tsx`);
-    fs.writeFileSync(outputPath, generatedCode);
-    console.log(`Archivo ${typeNameForFile}.tsx generado correctamente en ${outDir}`);
+    console.log(`\n✨ Proceso completado: ${generatedCount} archivo(s) generado(s)`);
 }
