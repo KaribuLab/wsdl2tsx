@@ -863,9 +863,21 @@ export const getPortTypeNode = (node: XmlNode): XmlNode | undefined => {
     return node[portTypeField!];
 };
 
-export const getOperationNode = (node: XmlNode): XmlNode | undefined => {
+export const getOperationNodes = (node: XmlNode): XmlNode[] => {
     const operationField = Object.keys(node).find(objectField => objectField.match(/([a-zA-z0-9]*:)?operation/));
-    return node[operationField!];
+    if (!operationField) return [];
+    const operationValue = node[operationField];
+    return Array.isArray(operationValue) ? operationValue : (operationValue ? [operationValue] : []);
+};
+
+export const getOperationNode = (node: XmlNode): XmlNode | undefined => {
+    const operations = getOperationNodes(node);
+    return operations.length > 0 ? operations[0] : undefined;
+};
+
+export const getOperationName = (operationNode: XmlNode): string => {
+    // El nombre puede estar en operationNode.name o en la clave del objeto padre
+    return operationNode.name || 'UnknownOperation';
 };
 
 export const getInputNode = (node: XmlNode): XmlNode | undefined => {
@@ -876,6 +888,85 @@ export const getInputNode = (node: XmlNode): XmlNode | undefined => {
 export const getPartNode = (node: XmlNode): XmlNode | undefined => {
     const partField = Object.keys(node).find(objectField => objectField.match(/([a-zA-z0-9]*:)?part/));
     return node[partField!];
+};
+
+export const getRequestTypeFromOperation = (
+    operationNode: XmlNode,
+    definitionsNode: XmlNode,
+    schemaObject: any
+): { operationName: string, requestType: string } | null => {
+    const operationName = getOperationName(operationNode);
+    
+    const inputNode = getInputNode(operationNode);
+    if (!inputNode) {
+        return null; // Operación sin input
+    }
+    
+    if (!inputNode.message) {
+        throw new Error(`El nodo input de la operación '${operationName}' no tiene el atributo message definido`);
+    }
+    
+    const messageNode = getMessageNode(definitionsNode);
+    if (!messageNode || messageNode.length === 0) {
+        throw new Error('No se encontraron nodos message en las definiciones del WSDL');
+    }
+    
+    const inputMessageNode = messageNode.find(item => inputNode.message!.endsWith(item.name!));
+    if (!inputMessageNode) {
+        throw new Error(`No se encontró el mensaje ${inputNode.message} en las definiciones`);
+    }
+    
+    const partNode = getPartNode(inputMessageNode);
+    if (!partNode) {
+        throw new Error(`No se encontró el nodo part en el mensaje de entrada de la operación '${operationName}'`);
+    }
+    
+    if (!partNode.element) {
+        throw new Error(`El nodo part de la operación '${operationName}' no tiene el atributo element definido`);
+    }
+    
+    // Obtener namespaces para resolver prefijos
+    const definitionsNamespaces = getNamespacesFromNode(definitionsNode);
+    
+    // Resolver el elemento: puede tener prefijo (ej: WL5G3N1:consultaCodigoPlan) o ser un nombre completo
+    let elementName = partNode.element;
+    let resolvedElementName = elementName;
+    
+    // Si tiene prefijo, intentar resolverlo
+    if (elementName.includes(':')) {
+        const [prefix, localName] = elementName.split(':');
+        const namespaceUri = definitionsNamespaces.get(prefix);
+        if (namespaceUri) {
+            // Construir nombre completo con namespace URI
+            resolvedElementName = `${namespaceUri}:${localName}`;
+        }
+    }
+    
+    // Buscar el tipo de varias formas:
+    // 1. Por nombre completo resuelto (namespace URI:nombre)
+    // 2. Por nombre con prefijo original
+    // 3. Por nombre local (sin prefijo)
+    const requestType = Object.keys(schemaObject).find(item => {
+        // Filtrar la clave $namespace
+        if (item === '$namespace') return false;
+        
+        // Buscar coincidencias exactas o por sufijo
+        return item === resolvedElementName || 
+               item === elementName ||
+               item.endsWith(`:${elementName.split(':').pop()}`) ||
+               resolvedElementName.endsWith(item.split(':').pop() || '') ||
+               elementName.endsWith(item.split(':').pop() || '');
+    });
+    
+    if (!requestType) {
+        const availableTypes = Object.keys(schemaObject).filter(k => k !== '$namespace').join(', ');
+        throw new Error(
+            `No se encontró el tipo de solicitud '${partNode.element}' (resuelto: '${resolvedElementName}') ` +
+            `para la operación '${operationName}'. Tipos disponibles: ${availableTypes || 'ninguno'}`
+        );
+    }
+    
+    return { operationName, requestType };
 };
 
 export const getRequestTypeFromDefinitions = (definitionsNode: XmlNode, schemaObject: any): string => {
