@@ -11,7 +11,7 @@ npm install -g @karibulab/wsdl2tsx
 O usar directamente con `npx`:
 
 ```bash
-npx @karibulab/wsdl2tsx <wsdl-url> <directorio-salida>
+npx @karibulab/wsdl2tsx <wsdl-url> <directorio-salida> [--operation=<nombre>]
 ```
 
 ## Uso
@@ -19,27 +19,42 @@ npx @karibulab/wsdl2tsx <wsdl-url> <directorio-salida>
 ### Desde línea de comandos
 
 ```bash
-wsdl2tsx <ruta-wsdl> <directorio-salida>
+wsdl2tsx <ruta-wsdl> <directorio-salida> [--operation=<nombre>]
 ```
 
-**Ejemplo:**
+**Ejemplos:**
 
 ```bash
+# Generar todas las operaciones
 wsdl2tsx http://ejemplo.com/servicio?wsdl ./output
+```
+
+```bash
+# Generar solo una operación específica
+wsdl2tsx http://ejemplo.com/servicio?wsdl ./output --operation=ConsultaCodigoPlan
+```
+
+```bash
+# Con flag corto
+wsdl2tsx http://ejemplo.com/servicio?wsdl ./output -o ConsultaCodigoPlan
 ```
 
 ### Parámetros
 
 - `<ruta-wsdl>`: URL o ruta local al archivo WSDL
 - `<directorio-salida>`: Directorio donde se generarán los archivos TSX
+- `--operation=<nombre>` o `-o <nombre>` (opcional): Especifica el nombre de la operación a generar. Si no se especifica, se generan todas las operaciones con input definido.
 
 ## Características
 
 - ✅ Genera componentes TypeScript/TSX tipados desde WSDL
+- ✅ **Soporta múltiples operaciones**: Genera un archivo TSX por cada operación del WSDL
+- ✅ **Filtrado por operación**: Permite generar solo una operación específica con `--operation` o `-o`
 - ✅ Respeta `elementFormDefault` para manejo correcto de namespaces
 - ✅ Genera interfaces TypeScript para todos los tipos complejos
 - ✅ Soporta múltiples schemas y namespaces
 - ✅ Maneja imports y referencias entre schemas
+- ✅ Omite automáticamente operaciones sin input (notificaciones, solo-output)
 - ✅ Genera código compatible con el runtime `@karibulab/wsdl2tsx-runtime`
 
 ## Ejemplo de salida
@@ -85,8 +100,14 @@ npm run build:cli
 
 # Ejecutar localmente
 cd packages/cli
-node dist/cli.js <wsdl-url> <output-dir>
+node dist/cli.js <wsdl-url> <output-dir> [--operation=<nombre>]
 ```
+
+### Notas sobre operaciones
+
+- **Operaciones sin input**: Las operaciones que no tienen un nodo `input` definido (como notificaciones o operaciones solo-output) se omiten automáticamente con una advertencia.
+- **Múltiples operaciones**: Por defecto, el CLI procesa todas las operaciones válidas y genera un archivo por cada una.
+- **Filtrado**: Usa `--operation` o `-o` para generar solo una operación específica, útil cuando trabajas con WSDL grandes.
 
 ## Licencia
 
