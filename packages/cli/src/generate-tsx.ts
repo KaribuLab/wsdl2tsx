@@ -6,16 +6,17 @@ import {
     getNamespacesFromNode,
     complexTypesFromSchema,
     schemaToObject,
-    getRequestTypeFromDefinitions,
     getElementNode,
     getPortTypeNode,
     getOperationNodes,
     getOperationName,
     getRequestTypeFromOperation,
+    type XmlNode,
 } from "./wsdl/index.js";
 import {
     extractAllNamespaceMappings,
     prepareTemplateData,
+    extractLocalName,
 } from "./codegen/index.js";
 import { registerHandlebarsHelpers } from "./template-helpers.js";
 import Handlebars, { type TemplateDelegate } from "handlebars";
@@ -321,18 +322,25 @@ export async function generateTsxFromWsdl(
         
         const referencedTypeNames = findReferencedTypes(requestTypeObject);
         
-        // Agregar tipos referenciados encontrados como strings
+        // Agregar solo los tipos referenciados encontrados (no todos los tipos del WSDL)
+        // Esto asegura que solo se generen interfaces para tipos realmente usados por esta operación
         for (const typeName of referencedTypeNames) {
             if (!allTypesForInterfaces[typeName] && allComplexTypes[typeName]) {
                 allTypesForInterfaces[typeName] = allComplexTypes[typeName];
             }
         }
         
-        // IMPORTANTE: Incluir TODOS los complexTypes que están en allComplexTypes
-        // porque algunos pueden estar referenciados indirectamente o expandidos en la estructura
-        for (const [typeName, typeDef] of Object.entries(allComplexTypes)) {
-            if (!allTypesForInterfaces[typeName]) {
-                allTypesForInterfaces[typeName] = typeDef;
+        // También incluir el tipo de respuesta si existe (ej: AddResponse)
+        // Buscar tipos de respuesta relacionados con esta operación
+        const responseTypeName = `${opName}Response`;
+        const responseTypeKeys = Object.keys(allComplexTypes).filter(k => {
+            const localName = extractLocalName(k);
+            return localName === responseTypeName || localName.toLowerCase() === responseTypeName.toLowerCase();
+        });
+        
+        for (const responseTypeKey of responseTypeKeys) {
+            if (!allTypesForInterfaces[responseTypeKey] && allComplexTypes[responseTypeKey]) {
+                allTypesForInterfaces[responseTypeKey] = allComplexTypes[responseTypeKey];
             }
         }
         

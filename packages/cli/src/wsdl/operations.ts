@@ -12,7 +12,7 @@ import {
 export { getOperationNodesFromNode as getOperationNodes };
 
 export const getOperationNode = (node: XmlNode): XmlNode | undefined => {
-    const operations = getOperationNodes(node);
+    const operations = getOperationNodesFromNode(node);
     return operations.length > 0 ? operations[0] : undefined;
 };
 

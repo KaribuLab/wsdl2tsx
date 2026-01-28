@@ -150,9 +150,10 @@ export function generateXmlBodyCode(baseNamespacePrefix: string, namespacesTypeM
     // El elemento raíz siempre debe tener prefijo (es un elemento global)
     // Los elementos hijos dependen de $qualified
     
-    // Determinar la ruta inicial de propiedades basándose en la interfaz de props
-    // Si hay una propiedad principal en la interfaz de props, usarla como punto de partida
-    const initialPropertyPath = propsInterfaceName ? toCamelCase(propsInterfaceName) : '';
+    // Para elementos raíz, las propiedades son directas (props.intA, props.intB)
+    // No necesitamos usar propsInterfaceName aquí porque estamos en el nivel raíz
+    // propsInterfaceName solo sería útil si hubiera un wrapper, pero en este caso
+    // las propiedades son directas del root element
     
     const properties = keys
         .map(key => {
@@ -161,13 +162,9 @@ export function generateXmlBodyCode(baseNamespacePrefix: string, namespacesTypeM
                 const keyLocalName = extractLocalName(key);
                 const keyCamelCase = toCamelCase(keyLocalName);
                 
-                // Si la clave actual coincide con propsInterfaceName, no agregarlo de nuevo a la ruta
-                // Solo usar initialPropertyPath si no coincide
-                const propertyPath = (initialPropertyPath && keyCamelCase === initialPropertyPath) 
-                    ? initialPropertyPath 
-                    : (initialPropertyPath 
-                        ? `${initialPropertyPath}.${keyCamelCase}` 
-                        : keyCamelCase);
+                // Para propiedades del root element, usar directamente el nombre de la propiedad
+                // sin prefijos adicionales
+                const propertyPath = keyCamelCase;
                 
                 return generateXmlPropertyCode(
                     namespacesTypeMapping,

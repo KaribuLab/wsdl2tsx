@@ -1,9 +1,8 @@
-import { toPascalCase, toCamelCase } from "../util.js";
-import { extractLocalName, extractXmlSchemaType, getTypeModifier, isValidInterfaceProperty, getFilteredKeys } from "./utils.js";
-import { XML_SCHEMA_TYPES, XML_SCHEMA_URI, NAMESPACE_KEY } from "./constants.js";
+import { toPascalCase } from "../util.js";
+import { NAMESPACE_KEY, XML_SCHEMA_TYPES, XML_SCHEMA_URI } from "./constants.js";
+import type { InterfaceData, NamespacePrefixesMapping, NamespaceTagsMapping, NamespaceTypesMapping, PropsInterfaceData, SimpleTypeData, TemplateData, TypeDefinition, TypeObject } from "./types.js";
+import { extractLocalName, extractXmlSchemaType, getFilteredKeys, getTypeModifier, isValidInterfaceProperty } from "./utils.js";
 import { generateXmlBodyCode } from "./xml-generator.js";
-import type { TypeObject, SimpleTypeData, PropsInterfaceData, InterfaceData, TemplateData, NamespaceTagsMapping, NamespacePrefixesMapping, NamespaceTypesMapping } from "./types.js";
-import type { TypeDefinition } from "./types.js";
 
 /**
  * Prepara datos de tipos simples para el template
@@ -195,7 +194,7 @@ function extractNestedComplexTypes(
 /**
  * Prepara datos de todas las interfaces para el template
  */
-export function prepareInterfacesData(requestTypeObject: TypeObject, namespaceKey: string, xmlSchemaUri: string, allTypesForInterfaces?: TypeObject): InterfaceData[] {
+export function prepareInterfacesData(requestTypeObject: TypeObject, namespaceKey: string, xmlSchemaUri: string, allTypesForInterfaces?: TypeObject, simpleTypeNames?: Set<string>): InterfaceData[] {
     const visited = new Set<string>();
     const interfaces: InterfaceData[] = [];
     
@@ -228,6 +227,10 @@ export function prepareInterfacesData(requestTypeObject: TypeObject, namespaceKe
         const localName = extractLocalName(key);
         // Convertir a PascalCase para comparación consistente
         const interfaceName = toPascalCase(localName);
+        // Excluir tipos simples que ya se generan como export type
+        if (simpleTypeNames && simpleTypeNames.has(interfaceName)) {
+            continue;
+        }
         if (!visited.has(interfaceName) && !interfaces.some(i => i.name === interfaceName)) {
             visited.add(interfaceName);
             interfaces.push(prepareInterfaceData(interfaceName, requestTypeObject[key] as any, allTypesForInterfaces));
@@ -236,6 +239,10 @@ export function prepareInterfacesData(requestTypeObject: TypeObject, namespaceKe
     
     // Procesar tipos complejos anidados encontrados recursivamente
     for (const { interfaceName, typeObject } of allComplexTypes) {
+        // Excluir tipos simples que ya se generan como export type
+        if (simpleTypeNames && simpleTypeNames.has(interfaceName)) {
+            continue;
+        }
         if (!visited.has(interfaceName) && !interfaces.some(i => i.name === interfaceName)) {
             visited.add(interfaceName);
             interfaces.push(prepareInterfaceData(interfaceName, { type: typeObject } as any, allTypesForInterfaces));
@@ -271,6 +278,10 @@ export function prepareInterfacesData(requestTypeObject: TypeObject, namespaceKe
     for (const key of remainingKeys) {
         const localName = extractLocalName(key);
         const interfaceName = toPascalCase(localName);
+        // Excluir tipos simples que ya se generan como export type
+        if (simpleTypeNames && simpleTypeNames.has(interfaceName)) {
+            continue;
+        }
         if (!visited.has(interfaceName) && !interfaces.some(i => i.name === interfaceName)) {
             visited.add(interfaceName);
             const typeDef = requestTypeObject[key]!;
@@ -300,6 +311,10 @@ export function prepareInterfacesData(requestTypeObject: TypeObject, namespaceKe
         for (const key of missingKeys) {
             const localName = extractLocalName(key);
             const interfaceName = toPascalCase(localName);
+            // Excluir tipos simples que ya se generan como export type
+            if (simpleTypeNames && simpleTypeNames.has(interfaceName)) {
+                continue;
+            }
             if (!visited.has(interfaceName) && !interfaces.some(i => i.name === interfaceName)) {
                 visited.add(interfaceName);
                 const typeDef = allTypesForInterfaces[key]!;
@@ -427,8 +442,18 @@ export function prepareTemplateData(
     const propsInterface = preparePropsInterfaceData(requestType, requestTypeObject, allTypesForInterfaces);
     
     // Para interfaces, usar allTypesForInterfaces si está disponible, sino usar requestTypeObject
-    const typesForInterfaces = allTypesForInterfaces || requestTypeObject;
-    const interfaces = prepareInterfacesData(typesForInterfaces, NAMESPACE_KEY, XML_SCHEMA_URI, allTypesForInterfaces);
+    // IMPORTANTE: Usar requestTypeObject como base para evitar incluir interfaces de otras operaciones
+    // allTypesForInterfaces solo debe contener tipos referenciados por la operación actual
+    const typesForInterfaces = requestTypeObject; // Usar requestTypeObject como base, no allTypesForInterfaces completo
+    
+    // Crear un Set con los nombres de los tipos simples para filtrarlos de las interfaces
+    // Usar el nombre local en PascalCase para comparación consistente
+    const simpleTypeNames = new Set(simpleTypes.map(st => {
+        const localName = extractLocalName(st.name);
+        return toPascalCase(localName);
+    }));
+    
+    const interfaces = prepareInterfacesData(typesForInterfaces, NAMESPACE_KEY, XML_SCHEMA_URI, allTypesForInterfaces, simpleTypeNames);
     
     // Obtener el nombre de la propiedad principal de la interfaz de props para usarlo como punto de partida en las rutas XML
     const mainPropName = propsInterface.properties.length > 0 ? propsInterface.properties[0].name : undefined;
