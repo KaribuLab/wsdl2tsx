@@ -12,11 +12,11 @@ import {
     getOperationNodes,
     getOperationName,
     getRequestTypeFromOperation,
-} from "./wsdl.js";
+} from "./wsdl/index.js";
 import {
     extractAllNamespaceMappings,
     prepareTemplateData,
-} from "./template.js";
+} from "./codegen/index.js";
 import { registerHandlebarsHelpers } from "./template-helpers.js";
 import Handlebars, { type TemplateDelegate } from "handlebars";
 import fs from "fs";

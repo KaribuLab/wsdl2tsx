@@ -1,6 +1,6 @@
 import Handlebars from "handlebars";
 import { toPascalCase, toCamelCase } from "./util.js";
-import { cachedSplit } from "./template.js";
+import { cachedSplit } from "./codegen/index.js";
 
 const XML_SCHEMA_TYPES: Record<string, string> = {
     'string': 'string',
