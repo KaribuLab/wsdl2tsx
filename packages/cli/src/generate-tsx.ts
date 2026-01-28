@@ -290,7 +290,6 @@ export async function generateTsxFromWsdl(
         
         // Función recursiva para encontrar todos los tipos referenciados
         const findReferencedTypes = (obj: any, found: Set<string> = new Set(), depth: number = 0): Set<string> => {
-            const indent = '  '.repeat(depth);
             for (const [key, value] of Object.entries(obj)) {
                 if (key === '$namespace' || key === '$base') continue;
                 

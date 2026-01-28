@@ -18,15 +18,27 @@ function parseArgs(): { wsdlPath: string; outDir: string; operationName?: string
         // Manejar flags --operation=X o --operation X
         if (arg === '--operation' || arg === '-o') {
             if (i + 1 < args.length && !args[i + 1]!.startsWith('-')) {
-                operationName = args[i + 1];
+                const value = args[i + 1];
+                if (!value || value.trim() === '') {
+                    throw new Error(`El flag ${arg} requiere un valor no vacío`);
+                }
+                operationName = value;
                 i++; // Saltar el siguiente argumento
             } else {
                 throw new Error(`El flag ${arg} requiere un valor`);
             }
         } else if (arg.startsWith('--operation=')) {
-            operationName = arg.split('=')[1];
+            const value = arg.split('=')[1];
+            if (!value || value.trim() === '') {
+                throw new Error('El flag --operation requiere un valor no vacío');
+            }
+            operationName = value;
         } else if (arg.startsWith('-o=')) {
-            operationName = arg.split('=')[1];
+            const value = arg.split('=')[1];
+            if (!value || value.trim() === '') {
+                throw new Error('El flag -o requiere un valor no vacío');
+            }
+            operationName = value;
         } else if (!wsdlPath) {
             wsdlPath = arg;
         } else if (!outDir) {

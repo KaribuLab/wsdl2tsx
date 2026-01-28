@@ -43,7 +43,7 @@ wsdl2tsx http://ejemplo.com/servicio?wsdl ./output -o ConsultaCodigoPlan
 
 - `<ruta-wsdl>`: URL o ruta local al archivo WSDL
 - `<directorio-salida>`: Directorio donde se generarán los archivos TSX
-- `--operation=<nombre>` o `-o <nombre>` (opcional): Especifica el nombre de la operación a generar. Si no se especifica, se generan todas las operaciones con input definido.
+- `--operation=<nombre>` o `-o <nombre>` (opcional): Especifica el nombre de la operación a generar. Si no se especifica, se generan todas las operaciones con input definido. El nombre debe coincidir exactamente con el nombre de la operación en el WSDL (no es case-sensitive).
 
 ## Características
 
