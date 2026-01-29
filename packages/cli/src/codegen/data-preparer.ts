@@ -1,8 +1,9 @@
-import { toPascalCase } from "../util.js";
+import { toPascalCase, toCamelCase } from "../util.js";
 import { NAMESPACE_KEY, XML_SCHEMA_TYPES, XML_SCHEMA_URI } from "./constants.js";
-import type { InterfaceData, NamespacePrefixesMapping, NamespaceTagsMapping, NamespaceTypesMapping, PropsInterfaceData, SimpleTypeData, TemplateData, TypeDefinition, TypeObject } from "./types.js";
+import type { InterfaceData, NamespacePrefixesMapping, NamespaceTagsMapping, NamespaceTypesMapping, PropsInterfaceData, SimpleTypeData, TemplateData, TypeDefinition, TypeObject, HeaderData } from "./types.js";
 import { extractLocalName, extractXmlSchemaType, getFilteredKeys, getTypeModifier, isValidInterfaceProperty } from "./utils.js";
 import { generateXmlBodyCode } from "./xml-generator.js";
+import { extractAllNamespaceMappings } from "./namespaces.js";
 
 /**
  * Prepara datos de tipos simples para el template
@@ -512,21 +513,28 @@ function resolveTypeName(
     allTypesForInterfaces?: TypeObject
 ): string {
     
+    // Extraer el nombre local del tipo (después del último ":")
+    const localTypeName = referencedType.split(':').pop() || referencedType;
+    
     // Verificar primero si es un tipo simple de XML Schema
-    // Si referencedType contiene "xsd:" o "http://www.w3.org/2001/XMLSchema", es un tipo simple
+    // Puede venir como "xsd:string", "http://www.w3.org/2001/XMLSchema:string", 
+    // o "http://cualquier-namespace:string" (donde el nombre local es un tipo simple)
     const isXsdType = referencedType.includes('xsd:');
     const isXmlSchemaType = referencedType.includes('http://www.w3.org/2001/XMLSchema');
+    const isSimpleTypeByName = localTypeName in XML_SCHEMA_TYPES;
     
-    if (isXsdType || isXmlSchemaType) {
+    if (isXsdType || isXmlSchemaType || isSimpleTypeByName) {
         // Extraer el nombre del tipo correctamente
         let xmlSchemaType: string;
         if (referencedType.includes('xsd:')) {
             // Formato: "xsd:string"
-            xmlSchemaType = referencedType.split('xsd:')[1] || referencedType.split(':').pop() || 'string';
-        } else {
+            xmlSchemaType = referencedType.split('xsd:')[1] || localTypeName;
+        } else if (referencedType.includes('http://www.w3.org/2001/XMLSchema')) {
             // Formato: "http://www.w3.org/2001/XMLSchema:string"
-            // Tomar la parte después del último ":"
-            xmlSchemaType = referencedType.split(':').pop() || 'string';
+            xmlSchemaType = localTypeName;
+        } else {
+            // Formato: "http://cualquier-namespace:string" - usar el nombre local
+            xmlSchemaType = localTypeName;
         }
         
         if (XML_SCHEMA_TYPES[xmlSchemaType]) {
@@ -597,7 +605,8 @@ export function prepareTemplateData(
     baseNamespacePrefix: string,
     allTypesForInterfaces?: TypeObject, // Opcional: tipos adicionales para generar interfaces
     schemaObject?: any, // Opcional: schemaObject completo para resolver referencias
-    allComplexTypes?: any // Opcional: allComplexTypes para resolver tipos complejos referenciados
+    allComplexTypes?: any, // Opcional: allComplexTypes para resolver tipos complejos referenciados
+    headersInfo?: Array<{ partName: string; elementName: string; headerType: string }> // Opcional: información de headers
 ): TemplateData {
     const simpleTypes = prepareSimpleTypesData(requestTypeObject, XML_SCHEMA_URI);
     const propsInterface = preparePropsInterfaceData(requestType, requestTypeObject, allTypesForInterfaces, schemaObject, allComplexTypes);
@@ -614,11 +623,107 @@ export function prepareTemplateData(
         return toPascalCase(localName);
     }));
     
-    const interfaces = prepareInterfacesData(typesForInterfaces, NAMESPACE_KEY, XML_SCHEMA_URI, allTypesForInterfaces, simpleTypeNames);
+    // Procesar headers si existen ANTES de generar las interfaces
+    // para que los tipos de header se incluyan en allTypesForInterfaces
+    const headers: HeaderData[] = [];
+    console.log(`[DEBUG prepareTemplateData] headersInfo: ${headersInfo ? JSON.stringify(headersInfo.map(h => ({ partName: h.partName, headerType: h.headerType }))) : 'undefined'}`);
+    if (headersInfo && headersInfo.length > 0) {
+        console.log(`[DEBUG prepareTemplateData] Procesando ${headersInfo.length} header(s)`);
+        for (const headerInfo of headersInfo) {
+            console.log(`[DEBUG prepareTemplateData] Buscando headerType: "${headerInfo.headerType}"`);
+            const headerTypeObject = schemaObject[headerInfo.headerType] as any;
+            if (!headerTypeObject) {
+                console.warn(`⚠️  No se encontró el tipo de header ${headerInfo.headerType}, se omite`);
+                continue;
+            }
+            console.log(`[DEBUG prepareTemplateData] Header encontrado, procesando...`);
+            
+            // Extraer mappings de namespace para el header
+            const headerNamespaceMappings = extractAllNamespaceMappings(headerInfo.headerType, headerTypeObject);
+            const headerNamespacePrefix = headerNamespaceMappings.typesMapping[headerInfo.headerType]?.prefix || baseNamespacePrefix;
+            
+            // Generar código XML para el header usando el nombre del part como prefijo para las props
+            const headerPartNameCamelCase = toCamelCase(extractLocalName(headerInfo.partName));
+            const headerXmlCode = generateXmlBodyCode(
+                headerNamespacePrefix,
+                namespacesTypeMapping,
+                headerInfo.headerType,
+                headerTypeObject,
+                headerPartNameCamelCase, // Pasar el nombre del part para usar como prefijo en las props
+                schemaObject,
+                allComplexTypes
+            );
+            
+            // Preparar interfaz de props para el header
+            const headerPropsInterface = preparePropsInterfaceData(
+                headerInfo.headerType,
+                headerTypeObject,
+                allTypesForInterfaces,
+                schemaObject,
+                allComplexTypes
+            );
+            
+            // Agregar el tipo del header a allTypesForInterfaces para que se genere su interfaz
+            if (!allTypesForInterfaces[headerInfo.headerType]) {
+                allTypesForInterfaces[headerInfo.headerType] = headerTypeObject;
+            }
+            
+            // Agregar los namespaces del header a los mappings si no existen
+            for (const [prefix, uri] of Object.entries(headerNamespaceMappings.prefixesMapping)) {
+                if (!namespacesPrefixMapping[prefix]) {
+                    namespacesPrefixMapping[prefix] = uri;
+                }
+            }
+            
+            // Agregar los tags del header a los mappings si no existen
+            for (const [prefix, tags] of Object.entries(headerNamespaceMappings.tagsMapping)) {
+                if (!namespacesTagsMapping[prefix]) {
+                    namespacesTagsMapping[prefix] = tags;
+                } else {
+                    // Agregar tags que no existan
+                    const existingTags = new Set(namespacesTagsMapping[prefix]);
+                    for (const tag of tags) {
+                        if (!existingTags.has(tag)) {
+                            namespacesTagsMapping[prefix].push(tag);
+                        }
+                    }
+                }
+            }
+            
+            headers.push({
+                partName: headerInfo.partName,
+                elementName: headerInfo.elementName,
+                headerType: headerInfo.headerType,
+                headerTypeObject,
+                xmlCode: headerXmlCode
+            });
+            
+            // Agregar propiedades del header a la interfaz de props principal
+            const headerLocalName = extractLocalName(headerInfo.partName);
+            const headerTypeLocalName = extractLocalName(headerInfo.headerType);
+            propsInterface.properties.push({
+                name: headerLocalName,
+                type: toPascalCase(headerTypeLocalName)
+            });
+        }
+    }
     
-    // Obtener el nombre de la propiedad principal de la interfaz de props para usarlo como punto de partida en las rutas XML
-    const mainPropName = propsInterface.properties.length > 0 ? propsInterface.properties[0].name : undefined;
-    const xmlBody = generateXmlBodyCode(baseNamespacePrefix, namespacesTypeMapping, requestType, requestTypeObject, mainPropName, schemaObject, allComplexTypes);
+    // Generar las interfaces DESPUÉS de procesar los headers
+    // para que los tipos de header se incluyan en allTypesForInterfaces
+    // También incluir tipos de header en typesForInterfaces para que se generen sus interfaces
+    const typesForInterfacesWithHeaders = { ...typesForInterfaces };
+    if (headersInfo && headersInfo.length > 0 && allTypesForInterfaces) {
+        for (const headerInfo of headersInfo) {
+            if (allTypesForInterfaces[headerInfo.headerType] && !typesForInterfacesWithHeaders[headerInfo.headerType]) {
+                typesForInterfacesWithHeaders[headerInfo.headerType] = allTypesForInterfaces[headerInfo.headerType];
+            }
+        }
+    }
+    const interfaces = prepareInterfacesData(typesForInterfacesWithHeaders, NAMESPACE_KEY, XML_SCHEMA_URI, allTypesForInterfaces, simpleTypeNames);
+    
+    // Para el body, no usar prefijo de propsInterfaceName (las propiedades son directas)
+    // Solo usar propsInterfaceName para headers
+    const xmlBody = generateXmlBodyCode(baseNamespacePrefix, namespacesTypeMapping, requestType, requestTypeObject, undefined, schemaObject, allComplexTypes);
     
     // Usar nombre local del requestType para el template
     const requestTypeLocalName = extractLocalName(requestType);
@@ -632,5 +737,6 @@ export function prepareTemplateData(
         soapNamespaceURI,
         xmlnsAttributes: namespacesPrefixMapping,
         xmlBody,
+        headers: headers.length > 0 ? headers : undefined,
     };
 }

@@ -103,7 +103,9 @@ export function generateXmlPropertyCode(
                 .filter(Boolean)
                 .join('\n');
             
-            return `{props.${currentPropertyPath}.map((item, i) => (
+            // Si propertyPath tiene un prefijo (propsInterfaceName), usarlo en el map
+            const mapPath = propertyPath || currentPropertyPath;
+            return `{props.${mapPath}.map((item, i) => (
     ${openTag}
     ${nestedProperties}
     ${closeTag}
@@ -120,7 +122,7 @@ export function generateXmlPropertyCode(
                             elementKey,
                             nestedElement as TypeDefinition,
                             key,
-                            currentPropertyPath,
+                            currentPropertyPath, // Mantener el propertyPath completo (incluye propsInterfaceName si existe)
                             isQualified
                         );
                     }
@@ -278,8 +280,10 @@ export function generateXmlBodyCode(baseNamespacePrefix: string, namespacesTypeM
                 const keyCamelCase = toCamelCase(keyLocalName);
                 
                 // Para propiedades del root element, usar directamente el nombre de la propiedad
-                // sin prefijos adicionales
-                const propertyPath = keyCamelCase;
+                // Si propsInterfaceName está definido, usarlo como prefijo (para headers)
+                const propertyPath = propsInterfaceName 
+                    ? `${propsInterfaceName}.${keyCamelCase}`
+                    : keyCamelCase;
                 
                 return generateXmlPropertyCode(
                     namespacesTypeMapping,

@@ -11,6 +11,7 @@ import {
     getOperationNodes,
     getOperationName,
     getRequestTypeFromOperation,
+    getHeadersFromOperation,
     getImportNode,
     getSchemaNode,
     type XmlNode,
@@ -377,6 +378,9 @@ export async function generateTsxFromWsdl(
             }
         }
         
+        // Extraer headers de la operación
+        const headersInfo = getHeadersFromOperation(operationNode, definitionsNode, schemaObject, allComplexTypes);
+        
         // Extraer todos los mappings de namespace en una sola pasada (optimización)
         const namespaceMappings = extractAllNamespaceMappings(requestType, requestTypeObject);
         const namespacesTagsMapping = namespaceMappings.tagsMapping;
@@ -397,7 +401,8 @@ export async function generateTsxFromWsdl(
             baseNamespacePrefix,
             allTypesForInterfaces, // Pasar allTypesForInterfaces como parámetro adicional para interfaces
             schemaObject, // Pasar schemaObject para resolver referencias de elementos
-            allComplexTypes // Pasar allComplexTypes para resolver tipos complejos referenciados
+            allComplexTypes, // Pasar allComplexTypes para resolver tipos complejos referenciados
+            headersInfo // Pasar información de headers
         );
         
         // Compilar el template y generar el código

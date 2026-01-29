@@ -169,3 +169,20 @@ export const getNamespacesFromNode = (node: XmlNode): Map<string, string> => {
     }
     return namespaces;
 };
+
+export const getBindingNode = (node: XmlNode): XmlNode | undefined => {
+    const bindingField = Object.keys(node).find(objectField => objectField.match(/([a-zA-z0-9]*:)?binding/));
+    return node[bindingField!];
+};
+
+export const getHeaderNode = (node: XmlNode): XmlNode | XmlNode[] | undefined => {
+    const headerField = Object.keys(node).find(objectField => objectField.match(/([a-zA-z0-9]*:)?header/));
+    if (!headerField) return undefined;
+    const headerValue = node[headerField];
+    return Array.isArray(headerValue) ? headerValue : (headerValue ? [headerValue] : undefined);
+};
+
+export const getBodyNode = (node: XmlNode): XmlNode | undefined => {
+    const bodyField = Object.keys(node).find(objectField => objectField.match(/([a-zA-z0-9]*:)?body/));
+    return node[bodyField!];
+};

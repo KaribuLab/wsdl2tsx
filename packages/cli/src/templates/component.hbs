@@ -24,7 +24,13 @@ export interface {{pascalCase name}} {
 export function {{pascalCase requestType}}(props: {{pascalCase requestType}}Props) {
     return <soap.Envelope xmlns:soap="{{soapNamespaceURI}}"
     {{xmlnsAttributes xmlnsAttributes}}>
-    <soap.Header />
+    <soap.Header>
+    {{#if headers}}
+    {{#each headers}}
+    {{{xmlCode}}}
+    {{/each}}
+    {{/if}}
+    </soap.Header>
     <soap.Body>
     {{{xmlBody}}}
     </soap.Body>

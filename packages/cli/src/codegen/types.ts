@@ -49,6 +49,14 @@ export interface PropsInterfaceData {
     properties: Array<{ name: string; type: string }>;
 }
 
+export interface HeaderData {
+    partName: string;
+    elementName: string;
+    headerType: string;
+    headerTypeObject: TypeObject;
+    xmlCode: string;
+}
+
 export interface TemplateData {
     requestType: string;
     namespaces: NamespaceTagsMapping;
@@ -58,6 +66,7 @@ export interface TemplateData {
     soapNamespaceURI: string;
     xmlnsAttributes: NamespacePrefixesMapping;
     xmlBody: string;
+    headers?: HeaderData[];
 }
 
 export interface CombinedNamespaceMappings {
