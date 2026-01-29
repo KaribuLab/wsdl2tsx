@@ -61,6 +61,74 @@ export function generateXmlPropertyCode(
         const referencedElement = resolveReferencedType(referencedType, schemaObject, allComplexTypes);
         
         if (referencedElement && typeof referencedElement === 'object') {
+            // Obtener el namespace del elemento referenciado para el tag wrapper
+            // El elemento referenciado puede tener su propio $namespace (del schema donde está definido)
+            let referencedElementNamespace = (referencedElement as any).$namespace;
+            
+            // Si el elemento referenciado no tiene $namespace, intentar obtenerlo de la clave
+            // donde está almacenado en schemaObject o allComplexTypes
+            if (typeof referencedElementNamespace !== 'string') {
+                // Buscar la clave completa del elemento referenciado en schemaObject o allComplexTypes
+                const typeLocalName = referencedType.split(':').pop() || referencedType;
+                let foundKey: string | undefined;
+                
+                if (schemaObject) {
+                    foundKey = Object.keys(schemaObject).find(k => {
+                        if (k === '$namespace' || k === '$qualified') return false;
+                        const kLocalName = k.split(':').pop() || k;
+                        return kLocalName === typeLocalName;
+                    });
+                    if (foundKey && foundKey.includes(':')) {
+                        const [nsUri] = foundKey.split(':');
+                        referencedElementNamespace = nsUri;
+                    }
+                }
+                
+                if (!foundKey && allComplexTypes) {
+                    foundKey = Object.keys(allComplexTypes).find(k => {
+                        const kLocalName = k.split(':').pop() || k;
+                        return kLocalName === typeLocalName;
+                    });
+                    if (foundKey && foundKey.includes(':')) {
+                        const [nsUri] = foundKey.split(':');
+                        referencedElementNamespace = nsUri;
+                    }
+                }
+            }
+            
+            let wrapperNamespacePrefix = namespacePrefix; // Por defecto usar el del elemento actual
+            
+            if (typeof referencedElementNamespace === 'string') {
+                // Buscar el prefijo correcto para el namespace del elemento referenciado
+                if (prefixesMapping) {
+                    for (const [prefix, uri] of Object.entries(prefixesMapping)) {
+                        if (uri === referencedElementNamespace) {
+                            wrapperNamespacePrefix = prefix;
+                            break;
+                        }
+                    }
+                } else {
+                    // Si no hay prefixesMapping, usar extractNamespacePrefix
+                    wrapperNamespacePrefix = getNamespacePrefix(
+                        namespacesTypeMapping,
+                        baseNamespacePrefix,
+                        key,
+                        parentKey,
+                        { $namespace: referencedElementNamespace } as any,
+                        prefixesMapping
+                    );
+                }
+            }
+            
+            // Determinar si el tag wrapper debe tener prefijo (usar el $qualified del elemento referenciado si existe)
+            const wrapperIsQualified = (referencedElement as any).$qualified !== false;
+            const wrapperOpenTag = wrapperIsQualified 
+                ? `<${wrapperNamespacePrefix}.${tagLocalName}>` 
+                : `<${tagLocalName}>`;
+            const wrapperCloseTag = wrapperIsQualified 
+                ? `</${wrapperNamespacePrefix}.${tagLocalName}>` 
+                : `</${tagLocalName}>`;
+            
             // Si el elemento referenciado tiene un type que es string, seguir resolviendo
             let finalReferencedElement = referencedElement;
             if ('type' in referencedElement && typeof referencedElement.type === 'string') {
@@ -121,9 +189,9 @@ export function generateXmlPropertyCode(
                         .filter(Boolean)
                         .join('\n');
                     
-                    return `${openTag}
+                    return `${wrapperOpenTag}
     ${nestedProperties}
-    ${closeTag}`;
+    ${wrapperCloseTag}`;
                 }
             }
             
@@ -173,9 +241,9 @@ export function generateXmlPropertyCode(
                     .filter(Boolean)
                     .join('\n');
                 
-                return `${openTag}
+                return `${wrapperOpenTag}
     ${nestedProperties}
-    ${closeTag}`;
+    ${wrapperCloseTag}`;
             }
         }
         // Si no se pudo resolver o no tiene propiedades, usar la propiedad directamente
