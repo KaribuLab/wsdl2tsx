@@ -40,7 +40,7 @@ export function processHeaders(
             debugContext("processHeaders", `✓ Header "${headerInfo.headerType}" encontrado y procesado`);
             
             // Extraer mappings de namespace para el header
-            const headerNamespaceMappings = extractAllNamespaceMappings(headerInfo.headerType, headerTypeObject);
+            const headerNamespaceMappings = extractAllNamespaceMappings(headerInfo.headerType, headerTypeObject, schemaObject, allComplexTypes);
             const headerNamespacePrefix = headerNamespaceMappings.typesMapping[headerInfo.headerType]?.prefix || baseNamespacePrefix;
             
             // Generar código XML para el header usando el nombre del part como prefijo para las props

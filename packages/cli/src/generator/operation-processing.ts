@@ -73,7 +73,7 @@ export function processOperation(
     const headersInfo = getHeadersFromOperation(operationNode, definitionsNode, schemaObject, allComplexTypes);
     
     // Extraer todos los mappings de namespace en una sola pasada (optimización)
-    const namespaceMappings = extractAllNamespaceMappings(requestType, requestTypeObject);
+    const namespaceMappings = extractAllNamespaceMappings(requestType, requestTypeObject, schemaObject, allComplexTypes);
     const namespacesTagsMapping = namespaceMappings.tagsMapping;
     const namespacesPrefixMapping = namespaceMappings.prefixesMapping;
     const namespacesTypeMapping = namespaceMappings.typesMapping;

@@ -1,7 +1,7 @@
 import { extractNamespacePrefix, extractLocalName, getFilteredKeys } from "./utils.js";
 import { NAMESPACE_KEY } from "./constants.js";
 import type { TypeObject, CombinedNamespaceMappings, NamespaceTagsMapping, NamespacePrefixesMapping, NamespaceTypesMapping, NamespaceInfo } from "./types.js";
-import { extractNestedTags, flattenKeysWithNamespace } from "./namespace-helpers.js";
+import { extractNestedTags, flattenKeysWithNamespace, extractAllTagsForXmlBody } from "./namespace-helpers.js";
 
 /**
  * Extrae todos los mappings de namespace en una sola pasada sobre los datos
@@ -10,7 +10,9 @@ import { extractNestedTags, flattenKeysWithNamespace } from "./namespace-helpers
  */
 export function extractAllNamespaceMappings(
     baseTypeName: string,
-    baseTypeObject: TypeObject
+    baseTypeObject: TypeObject,
+    schemaObject?: any,
+    allComplexTypes?: any
 ): CombinedNamespaceMappings {
     const tagsMapping: NamespaceTagsMapping = {};
     const prefixesMapping: NamespacePrefixesMapping = {};
@@ -101,6 +103,36 @@ export function extractAllNamespaceMappings(
             uri: item.uri,
             prefix: item.prefix,
         };
+    }
+    
+    // IMPORTANTE: También extraer todos los tags que se usarán en el XML body
+    // Esto incluye tags de tipos referenciados que pueden no ser qualified pero se usan con prefijo
+    // Necesario para registrar tags como rutCliente, aniCliente en el namespace
+    const allXmlBodyTags = extractAllTagsForXmlBody(
+        baseTypeObject,
+        typesMapping,
+        baseNamespacePrefix,
+        baseNamespace,
+        new Set(),
+        schemaObject,
+        allComplexTypes
+    );
+    
+    // Agregar todos los tags del XML body al namespace correspondiente
+    if (allXmlBodyTags.length > 0) {
+        if (tagsMapping[baseNamespacePrefix] === undefined) {
+            tagsMapping[baseNamespacePrefix] = [];
+            prefixesMapping[baseNamespacePrefix] = baseNamespace;
+        }
+        
+        // Agregar tags que no estén ya en el array
+        const existingTags = new Set(tagsMapping[baseNamespacePrefix] || []);
+        for (const tag of allXmlBodyTags) {
+            if (!existingTags.has(tag)) {
+                tagsMapping[baseNamespacePrefix]!.push(tag);
+                existingTags.add(tag);
+            }
+        }
     }
     
     return {
