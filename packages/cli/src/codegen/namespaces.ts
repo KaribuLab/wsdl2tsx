@@ -161,6 +161,8 @@ export function extractAllNamespaceMappings(
     }
     
     // Agregar tags al namespace correspondiente según su namespace real
+    // IMPORTANTE: Solo agregar tags que no estén ya en otro namespace para evitar duplicados
+    const allTagsAdded = new Set<string>();
     for (const [nsUri, tags] of xmlBodyResult.tagsByNamespace) {
         // Buscar si ya existe un prefijo para este URI
         let finalPrefix: string | undefined;
@@ -181,32 +183,41 @@ export function extractAllNamespaceMappings(
             tagsMapping[finalPrefix] = [];
         }
         
-        // Agregar tags que no estén ya en el array
+        // Agregar tags que no estén ya en el array y que no hayan sido agregados a otro namespace
         const existingTags = new Set(tagsMapping[finalPrefix] || []);
+        const tagsToAdd: string[] = [];
         for (const tag of tags) {
-            if (!existingTags.has(tag)) {
-                tagsMapping[finalPrefix]!.push(tag);
-                existingTags.add(tag);
+            // Solo agregar si no está en este namespace Y no ha sido agregado a otro namespace
+            if (!existingTags.has(tag) && !allTagsAdded.has(tag)) {
+                tagsToAdd.push(tag);
+                allTagsAdded.add(tag);
             }
         }
-        debugContext("extractAllNamespaceMappings", `Agregando ${tags.length} tag(s) al namespace "${finalPrefix}" (${nsUri})`);
+        
+        if (tagsToAdd.length > 0) {
+            tagsMapping[finalPrefix]!.push(...tagsToAdd);
+            debugContext("extractAllNamespaceMappings", `Agregando ${tagsToAdd.length} tag(s) al namespace "${finalPrefix}" (${nsUri}): ${tagsToAdd.join(', ')}`);
+        }
     }
     
-    // También agregar tags al namespace base si no se agregaron en el paso anterior
-    if (xmlBodyResult.tags.length > 0) {
+    // Solo agregar tags al namespace base si pertenecen al namespace base
+    // No agregar tags que ya fueron asignados a otros namespaces
+    const baseNamespaceTags = xmlBodyResult.tagsByNamespace.get(baseNamespace);
+    if (baseNamespaceTags && baseNamespaceTags.length > 0) {
         if (tagsMapping[baseNamespacePrefix] === undefined) {
             tagsMapping[baseNamespacePrefix] = [];
             prefixesMapping[baseNamespacePrefix] = baseNamespace;
         }
         
-        // Agregar tags que no estén ya en el array
+        // Agregar solo los tags que pertenecen al namespace base
         const existingTags = new Set(tagsMapping[baseNamespacePrefix] || []);
-        for (const tag of xmlBodyResult.tags) {
+        for (const tag of baseNamespaceTags) {
             if (!existingTags.has(tag)) {
                 tagsMapping[baseNamespacePrefix]!.push(tag);
                 existingTags.add(tag);
             }
         }
+        debugContext("extractAllNamespaceMappings", `Agregando ${baseNamespaceTags.length} tag(s) al namespace base "${baseNamespacePrefix}"`);
     }
     
     return {
