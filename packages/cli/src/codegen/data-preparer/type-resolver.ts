@@ -138,6 +138,14 @@ export function extractNestedComplexTypes(
                         );
                         result.push(...nestedTypes);
                     }
+                } else if (typeof typeValue === 'string') {
+                    // Si type es un string (referencia a tipo), también intentar extraer el tipo referenciado
+                    // Esto es necesario para tipos como consultarPerfilClienteResponseType que pueden estar
+                    // referenciados como strings dentro de propiedades
+                    const referencedType = typeValue;
+                    // Buscar el tipo referenciado en allTypesForInterfaces si está disponible
+                    // Nota: Necesitamos pasar allTypesForInterfaces como parámetro para esto
+                    // Por ahora, solo extraemos tipos inline (con type como objeto)
                 }
             }
         }

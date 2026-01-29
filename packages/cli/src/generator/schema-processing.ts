@@ -41,7 +41,8 @@ export async function processSchemaAndImports(
                     }
                 } catch (error: any) {
                     // Si falla al cargar el XSD externo, continuar sin él
-                    console.warn(`Advertencia: No se pudo cargar el XSD importado desde ${item.schemaLocation}: ${error.message}`);
+                    const { warn } = await import("../logger.js");
+                    warn(`Advertencia: No se pudo cargar el XSD importado desde ${item.schemaLocation}: ${error.message}`);
                 }
             }
         }

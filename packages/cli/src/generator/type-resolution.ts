@@ -60,30 +60,92 @@ export function isTypeReferenced(typeName: string, typeObject: any, allComplexTy
 /**
  * Función recursiva para encontrar todos los tipos referenciados
  */
-export function findReferencedTypes(obj: any, allComplexTypes: any, found: Set<string> = new Set(), depth: number = 0): Set<string> {
+export function findReferencedTypes(obj: any, allComplexTypes: any, found: Set<string> = new Set(), depth: number = 0, schemaObject?: any): Set<string> {
+    // Evitar recursión infinita
+    if (depth > 20) return found;
+    
     for (const [key, value] of Object.entries(obj)) {
-        if (key === '$namespace' || key === '$base') continue;
+        if (key === '$namespace' || key === '$base' || key === '$qualified') continue;
         
         if (typeof value === 'object' && value !== null && 'type' in value) {
             const typeValue = (value as any).type;
             if (typeof typeValue === 'string') {
-                // Buscar si este tipo está en allComplexTypes
-                const matchingType = Object.keys(allComplexTypes).find(k => 
-                    k === typeValue || 
-                    k.endsWith(':' + typeValue.split(':').pop()) ||
-                    k.split(':').pop() === typeValue.split(':').pop()
-                );
+                // Buscar primero en schemaObject (elementos globales)
+                let matchingType: string | undefined;
+                
+                if (schemaObject) {
+                    matchingType = Object.keys(schemaObject).find(k => 
+                        k !== '$namespace' && k !== '$qualified' &&
+                        (k === typeValue || 
+                         k.endsWith(':' + typeValue.split(':').pop()) ||
+                         k.split(':').pop() === typeValue.split(':').pop())
+                    );
+                }
+                
+                // Si no se encuentra en schemaObject, buscar en allComplexTypes
+                if (!matchingType && allComplexTypes) {
+                    matchingType = Object.keys(allComplexTypes).find(k => 
+                        k === typeValue || 
+                        k.endsWith(':' + typeValue.split(':').pop()) ||
+                        k.split(':').pop() === typeValue.split(':').pop()
+                    );
+                }
+                
                 if (matchingType && !found.has(matchingType)) {
                     found.add(matchingType);
                     // Buscar recursivamente dentro del tipo encontrado
-                    if (allComplexTypes[matchingType]) {
-                        findReferencedTypes(allComplexTypes[matchingType], allComplexTypes, found, depth + 1);
+                    const foundTypeObject = schemaObject?.[matchingType] || allComplexTypes?.[matchingType];
+                    if (foundTypeObject) {
+                        findReferencedTypes(foundTypeObject, allComplexTypes, found, depth + 1, schemaObject);
                     }
-                } else if (matchingType && found.has(matchingType)) {
                 }
             } else if (typeof typeValue === 'object' && typeValue !== null) {
                 // Tipo complejo anidado, buscar recursivamente
-                findReferencedTypes(typeValue, allComplexTypes, found, depth + 1);
+                findReferencedTypes(typeValue, allComplexTypes, found, depth + 1, schemaObject);
+            }
+        } else if (typeof value === 'object' && value !== null) {
+            // También buscar directamente en las propiedades del objeto (sin wrapper 'type')
+            // Esto es necesario para encontrar tipos que están como propiedades directas
+            // Por ejemplo, en respConsultarPerfilCliente hay propiedades como consultarPerfilClienteResponseType
+            // que tienen un objeto con 'type' que referencia a otro tipo
+            for (const [nestedKey, nestedValue] of Object.entries(value)) {
+                if (nestedKey === '$namespace' || nestedKey === '$base' || nestedKey === '$qualified') continue;
+                
+                if (typeof nestedValue === 'object' && nestedValue !== null && 'type' in nestedValue) {
+                    const nestedTypeValue = (nestedValue as any).type;
+                    if (typeof nestedTypeValue === 'string') {
+                        // Buscar primero en schemaObject
+                        let matchingType: string | undefined;
+                        if (schemaObject) {
+                            matchingType = Object.keys(schemaObject).find(k => 
+                                k !== '$namespace' && k !== '$qualified' &&
+                                (k === nestedTypeValue || 
+                                 k.endsWith(':' + nestedTypeValue.split(':').pop()) ||
+                                 k.split(':').pop() === nestedTypeValue.split(':').pop() ||
+                                 nestedTypeValue.endsWith(':' + k.split(':').pop()))
+                            );
+                        }
+                        // Si no se encuentra en schemaObject, buscar en allComplexTypes
+                        if (!matchingType && allComplexTypes) {
+                            matchingType = Object.keys(allComplexTypes).find(k => 
+                                k === nestedTypeValue || 
+                                k.endsWith(':' + nestedTypeValue.split(':').pop()) ||
+                                k.split(':').pop() === nestedTypeValue.split(':').pop() ||
+                                nestedTypeValue.endsWith(':' + k.split(':').pop())
+                            );
+                        }
+                        if (matchingType && !found.has(matchingType)) {
+                            found.add(matchingType);
+                            const foundTypeObject = schemaObject?.[matchingType] || allComplexTypes?.[matchingType];
+                            if (foundTypeObject) {
+                                findReferencedTypes(foundTypeObject, allComplexTypes, found, depth + 1, schemaObject);
+                            }
+                        }
+                    } else if (typeof nestedTypeValue === 'object' && nestedTypeValue !== null) {
+                        // Tipo complejo anidado dentro de otro tipo complejo, buscar recursivamente
+                        findReferencedTypes(nestedTypeValue, allComplexTypes, found, depth + 1, schemaObject);
+                    }
+                }
             }
         }
     }

@@ -67,6 +67,10 @@ export interface TemplateData {
     xmlnsAttributes: NamespacePrefixesMapping;
     xmlBody: string;
     headers?: HeaderData[];
+    // Response data (opcional)
+    responseType?: string;
+    responsePropsInterface?: PropsInterfaceData;
+    responseInterfaces?: InterfaceData[];
 }
 
 export interface CombinedNamespaceMappings {

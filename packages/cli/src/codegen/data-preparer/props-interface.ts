@@ -3,6 +3,7 @@ import { XML_SCHEMA_TYPES } from "../constants.js";
 import { extractLocalName, extractXmlSchemaType, getFilteredKeys } from "../utils.js";
 import { resolveTypeName } from "./type-resolver.js";
 import type { PropsInterfaceData, TypeObject } from "../types.js";
+import { debugContext } from "../../logger.js";
 
 /**
  * Prepara datos de la interfaz de props para el template
@@ -10,38 +11,36 @@ import type { PropsInterfaceData, TypeObject } from "../types.js";
  */
 export function preparePropsInterfaceData(typeName: string, typeObject: TypeObject, allTypesForInterfaces?: TypeObject, schemaObject?: any, allComplexTypes?: any): PropsInterfaceData {
     const keys = getFilteredKeys(typeObject);
-    console.log(`[DEBUG preparePropsInterfaceData] typeName: "${typeName}", keys encontradas: ${keys.join(', ')}`);
+    debugContext("preparePropsInterfaceData", `Procesando tipo "${typeName}" con ${keys.length} propiedades: ${keys.join(', ')}`);
     
     // Si solo hay una clave y es un tipo complejo con type como objeto, extraer propiedades del type
     if (keys.length === 1) {
         const singleKey = keys[0]!;
         const element = typeObject[singleKey]!;
-        console.log(`[DEBUG preparePropsInterfaceData] Procesando clave única: "${singleKey}", element type: ${typeof element}`);
+        debugContext("preparePropsInterfaceData", `Procesando propiedad única "${singleKey}" (tipo: ${typeof element})`);
         
         if (typeof element === 'object' && element !== null && 'type' in element) {
             const typeValue = (element as any).type;
-            console.log(`[DEBUG preparePropsInterfaceData] typeValue: ${typeof typeValue === 'string' ? `"${typeValue}"` : typeof typeValue}`);
+            debugContext("preparePropsInterfaceData", `Tipo de propiedad: ${typeof typeValue === 'string' ? `referencia "${typeValue}"` : `objeto complejo`}`);
             
             // Si type es un string (referencia a elemento o tipo), intentar resolverla desde schemaObject y allComplexTypes
             if (typeof typeValue === 'string' && (schemaObject || allComplexTypes)) {
-                console.log(`[DEBUG preparePropsInterfaceData] Buscando referencia: "${typeValue}"`);
+                debugContext("preparePropsInterfaceData", `Resolviendo referencia de tipo: "${typeValue}"`);
                 
                 // Buscar el elemento/tipo referenciado primero en schemaObject, luego en allComplexTypes
                 let referencedElement = schemaObject?.[typeValue];
-                console.log(`[DEBUG preparePropsInterfaceData] Búsqueda exacta en schemaObject: ${referencedElement ? 'ENCONTRADO' : 'NO ENCONTRADO'}`);
                 
                 // Si no se encuentra en schemaObject, buscar en allComplexTypes
                 if (!referencedElement && allComplexTypes) {
                     referencedElement = allComplexTypes[typeValue];
-                    console.log(`[DEBUG preparePropsInterfaceData] Búsqueda exacta en allComplexTypes: ${referencedElement ? 'ENCONTRADO' : 'NO ENCONTRADO'}`);
                 }
                 
                 // Si no se encuentra exactamente, buscar por nombre local en schemaObject
                 if (!referencedElement && schemaObject) {
                     const typeLocalName = typeValue.split(':').pop() || typeValue;
-                    console.log(`[DEBUG preparePropsInterfaceData] Buscando por nombre local "${typeLocalName}" en schemaObject`);
+                    debugContext("preparePropsInterfaceData", `Buscando por nombre local "${typeLocalName}" en schemaObject`);
                     const schemaKeys = Object.keys(schemaObject).filter(k => k !== '$namespace' && k !== '$qualified');
-                    console.log(`[DEBUG preparePropsInterfaceData] Claves disponibles en schemaObject: ${schemaKeys.slice(0, 10).join(', ')}${schemaKeys.length > 10 ? '...' : ''}`);
+                    debugContext("preparePropsInterfaceData", `Total de claves en schemaObject: ${schemaKeys.length}`);
                     const matchingKey = schemaKeys.find(key => {
                         const keyLocalName = key.split(':').pop() || key;
                         return keyLocalName === typeLocalName || 
@@ -51,16 +50,16 @@ export function preparePropsInterfaceData(typeName: string, typeObject: TypeObje
                     });
                     if (matchingKey) {
                         referencedElement = schemaObject[matchingKey];
-                        console.log(`[DEBUG preparePropsInterfaceData] Encontrado por nombre local en schemaObject: "${matchingKey}"`);
+                        debugContext("preparePropsInterfaceData", `✓ Encontrado en schemaObject: "${matchingKey}"`);
                     }
                 }
                 
                 // Si todavía no se encuentra, buscar por nombre local en allComplexTypes
                 if (!referencedElement && allComplexTypes) {
                     const typeLocalName = typeValue.split(':').pop() || typeValue;
-                    console.log(`[DEBUG preparePropsInterfaceData] Buscando por nombre local "${typeLocalName}" en allComplexTypes`);
+                    debugContext("preparePropsInterfaceData", `Buscando por nombre local "${typeLocalName}" en allComplexTypes`);
                     const complexTypeKeys = Object.keys(allComplexTypes);
-                    console.log(`[DEBUG preparePropsInterfaceData] Claves disponibles en allComplexTypes: ${complexTypeKeys.slice(0, 10).join(', ')}${complexTypeKeys.length > 10 ? '...' : ''}`);
+                    debugContext("preparePropsInterfaceData", `Total de claves en allComplexTypes: ${complexTypeKeys.length}`);
                     const matchingKey = complexTypeKeys.find(key => {
                         const keyLocalName = key.split(':').pop() || key;
                         return keyLocalName === typeLocalName || 
@@ -70,62 +69,50 @@ export function preparePropsInterfaceData(typeName: string, typeObject: TypeObje
                     });
                     if (matchingKey) {
                         referencedElement = allComplexTypes[matchingKey];
-                        console.log(`[DEBUG preparePropsInterfaceData] Encontrado por nombre local en allComplexTypes: "${matchingKey}"`);
+                        debugContext("preparePropsInterfaceData", `✓ Encontrado en allComplexTypes: "${matchingKey}"`);
                     }
                 }
                 
                 if (!referencedElement) {
-                    console.log(`[DEBUG preparePropsInterfaceData] NO se encontró la referencia "${typeValue}"`);
+                    debugContext("preparePropsInterfaceData", `✗ No se encontró la referencia "${typeValue}"`);
                 } else {
-                    console.log(`[DEBUG preparePropsInterfaceData] Referencia encontrada, tipo: ${typeof referencedElement}`);
-                    if (typeof referencedElement === 'object') {
-                        console.log(`[DEBUG preparePropsInterfaceData] Claves del elemento: ${Object.keys(referencedElement).join(', ')}`);
-                        if ('type' in referencedElement) {
-                            console.log(`[DEBUG preparePropsInterfaceData] Elemento tiene type: ${typeof referencedElement.type}, valor: ${typeof referencedElement.type === 'string' ? `"${referencedElement.type}"` : JSON.stringify(referencedElement.type).substring(0, 100)}`);
-                        }
-                    }
+                    debugContext("preparePropsInterfaceData", `✓ Referencia resuelta (${typeof referencedElement === 'object' ? Object.keys(referencedElement).length + ' propiedades' : 'tipo simple'})`);
                 }
                 
                 if (referencedElement && typeof referencedElement === 'object') {
                     // Si el elemento referenciado tiene un type que es string, seguir resolviendo
                     if ('type' in referencedElement && typeof referencedElement.type === 'string') {
                         const nestedTypeValue = referencedElement.type;
-                        console.log(`[DEBUG preparePropsInterfaceData] Elemento referenciado tiene type string: "${nestedTypeValue}", resolviendo recursivamente...`);
+                        debugContext("preparePropsInterfaceData", `Resolviendo tipo anidado recursivamente: "${nestedTypeValue}"`);
                         
                         // Continuar resolviendo recursivamente - buscar primero en schemaObject, luego en allComplexTypes
                         let nestedReferencedElement = schemaObject?.[nestedTypeValue];
-                        console.log(`[DEBUG preparePropsInterfaceData] Búsqueda exacta de "${nestedTypeValue}" en schemaObject: ${nestedReferencedElement ? 'ENCONTRADO' : 'NO ENCONTRADO'}`);
                         
                         if (!nestedReferencedElement && allComplexTypes) {
                             nestedReferencedElement = allComplexTypes[nestedTypeValue];
-                            console.log(`[DEBUG preparePropsInterfaceData] Búsqueda exacta de "${nestedTypeValue}" en allComplexTypes: ${nestedReferencedElement ? 'ENCONTRADO' : 'NO ENCONTRADO'}`);
                         }
                         
                         // Si no se encuentra exactamente, buscar por nombre local
                         if (!nestedReferencedElement) {
                             const nestedTypeLocalName = nestedTypeValue.split(':').pop() || nestedTypeValue;
-                            console.log(`[DEBUG preparePropsInterfaceData] Buscando por nombre local "${nestedTypeLocalName}"...`);
+                            debugContext("preparePropsInterfaceData", `Buscando tipo anidado por nombre local "${nestedTypeLocalName}"`);
                             
                             // Buscar primero en schemaObject
-                            if (schemaObject) {
-                                const schemaKeys = Object.keys(schemaObject).filter(k => k !== '$namespace' && k !== '$qualified');
-                                const nestedMatchingKey = schemaKeys.find(key => {
-                                    const keyLocalName = key.split(':').pop() || key;
-                                    return keyLocalName === nestedTypeLocalName || 
-                                           key === nestedTypeValue ||
-                                           key.endsWith(`:${nestedTypeLocalName}`) ||
-                                           nestedTypeValue.endsWith(keyLocalName);
-                                });
-                                if (nestedMatchingKey) {
-                                    nestedReferencedElement = schemaObject[nestedMatchingKey];
-                                    console.log(`[DEBUG preparePropsInterfaceData] Encontrado por nombre local en schemaObject: "${nestedMatchingKey}"`);
-                                }
-                            }
-                            
-                            // Si todavía no se encuentra, buscar en allComplexTypes
-                            if (!nestedReferencedElement && allComplexTypes) {
-                                const complexTypeKeys = Object.keys(allComplexTypes);
-                                const nestedMatchingKey = complexTypeKeys.find(key => {
+                            let nestedMatchingKey = Object.keys(schemaObject || {}).find(key => {
+                                if (key === '$namespace' || key === '$qualified') return false;
+                                const keyLocalName = key.split(':').pop() || key;
+                                return keyLocalName === nestedTypeLocalName || 
+                                       key === nestedTypeValue ||
+                                       key.endsWith(`:${nestedTypeLocalName}`) ||
+                                       nestedTypeValue.endsWith(keyLocalName);
+                            });
+                            if (nestedMatchingKey) {
+                                nestedReferencedElement = schemaObject[nestedMatchingKey];
+                                debugContext("preparePropsInterfaceData", `✓ Tipo anidado encontrado en schemaObject: "${nestedMatchingKey}"`);
+                            } else {
+                                // Buscar en allComplexTypes
+                                const complexTypeKeys = Object.keys(allComplexTypes || {});
+                                nestedMatchingKey = complexTypeKeys.find(key => {
                                     const keyLocalName = key.split(':').pop() || key;
                                     return keyLocalName === nestedTypeLocalName || 
                                            key === nestedTypeValue ||
@@ -134,19 +121,17 @@ export function preparePropsInterfaceData(typeName: string, typeObject: TypeObje
                                 });
                                 if (nestedMatchingKey) {
                                     nestedReferencedElement = allComplexTypes[nestedMatchingKey];
-                                    console.log(`[DEBUG preparePropsInterfaceData] Encontrado por nombre local en allComplexTypes: "${nestedMatchingKey}"`);
+                                    debugContext("preparePropsInterfaceData", `✓ Tipo anidado encontrado en allComplexTypes: "${nestedMatchingKey}"`);
                                 } else {
-                                    console.log(`[DEBUG preparePropsInterfaceData] NO encontrado por nombre local en allComplexTypes. Claves disponibles: ${complexTypeKeys.slice(0, 10).join(', ')}${complexTypeKeys.length > 10 ? '...' : ''}`);
+                                    debugContext("preparePropsInterfaceData", `✗ Tipo anidado no encontrado: "${nestedTypeValue}"`);
                                 }
                             }
                         }
                         
                         if (nestedReferencedElement && typeof nestedReferencedElement === 'object') {
-                            console.log(`[DEBUG preparePropsInterfaceData] Tipo anidado encontrado, expandiendo contenido...`);
+                            debugContext("preparePropsInterfaceData", `Expandiendo contenido del tipo anidado`);
                             // Usar el tipo anidado directamente
                             return preparePropsInterfaceData(typeName, nestedReferencedElement, allTypesForInterfaces, schemaObject, allComplexTypes);
-                        } else {
-                            console.log(`[DEBUG preparePropsInterfaceData] NO se encontró el tipo anidado "${nestedTypeValue}"`);
                         }
                     }
                     // Si encontramos el elemento referenciado, expandir su contenido

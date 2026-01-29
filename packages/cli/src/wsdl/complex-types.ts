@@ -1,14 +1,11 @@
 import type { XmlNode, ComplexTypes } from "./types.js";
-import { loadXsd } from "./loader.js";
 import {
-    getSchemaNode,
-    getImportNode,
-    getComplexTypeNode,
     getElementNode,
-    getSequenceNode,
+    getComplexTypeNode,
     getNamespacesFromNode,
 } from "./node-extractors.js";
 import { complexTypeToObject } from "./processors/index.js";
+import { processImports, processComplexTypeNodes, processElementNodes } from "./complex-type-helpers.js";
 
 export const complexTypesFromSchema = async (wsdlFile: string, node: XmlNode, namespaces: Map<string, string> | undefined): Promise<ComplexTypes> => {
     const targetNamespace = node.targetNamespace;
@@ -16,80 +13,16 @@ export const complexTypesFromSchema = async (wsdlFile: string, node: XmlNode, na
     const schemaNamespaces = namespaces ?? getNamespacesFromNode(node);
     const currentNamespaces = schemaNamespaces;
     let object: ComplexTypes = {};
-    const importNode = getImportNode(node);
-    if (importNode !== undefined) {
-        if (Array.isArray(importNode)) {
-            for (const item of importNode) {
-                // Solo procesar imports que tengan schemaLocation definido
-                if (!item.schemaLocation) {
-                    // Import sin schemaLocation - los tipos pueden estar en el mismo WSDL
-                    continue;
-                }
-                try {
-                    const importedXsd = await loadXsd(wsdlFile, item.schemaLocation);
-                const schemaNode = getSchemaNode(importedXsd);
-                    if (schemaNode) {
-                        const importedComplexTypes = await complexTypesFromSchema(wsdlFile, schemaNode, currentNamespaces);
-                object = { ...object, ...importedComplexTypes };
-                    }
-                } catch (error: any) {
-                    // Si falla al cargar el XSD externo, continuar sin él
-                    // Los tipos pueden estar definidos en el mismo WSDL
-                    console.warn(`Advertencia: No se pudo cargar el XSD importado desde ${item.schemaLocation}: ${error.message}`);
-                }
-            }
-        } else {
-            // Solo procesar imports que tengan schemaLocation definido
-            if (importNode.schemaLocation) {
-                try {
-                    const importedXsd = await loadXsd(wsdlFile, importNode.schemaLocation);
-            const schemaNode = getSchemaNode(importedXsd);
-                    if (schemaNode) {
-                        const importedComplexTypes = await complexTypesFromSchema(wsdlFile, schemaNode, currentNamespaces);
-            object = { ...object, ...importedComplexTypes };
-                    }
-                } catch (error: any) {
-                    // Si falla al cargar el XSD externo, continuar sin él
-                    console.warn(`Advertencia: No se pudo cargar el XSD importado desde ${importNode.schemaLocation}: ${error.message}`);
-                }
-            }
-        }
-    }
-    const complexTypeNode = getComplexTypeNode(node);
-    if (complexTypeNode !== undefined) {
-        if (Array.isArray(complexTypeNode)) {
-            for (const item of complexTypeNode) {
-                object[targetNamespace + ':' + item.name!] = complexTypeToObject(item, currentNamespaces, object, targetNamespace, isQualified);
-            }
-        } else {
-            object[targetNamespace + ':' + complexTypeNode.name!] = complexTypeToObject(complexTypeNode, currentNamespaces, object, targetNamespace, isQualified);
-        }
-    }
-    // Buscar elementos con complexType inline (elementos que tienen complexType dentro de ellos)
-    const elementNode = getElementNode(node);
-    if (elementNode !== undefined) {
-        if (Array.isArray(elementNode)) {
-            for (const item of elementNode) {
-                const itemComplexType = getComplexTypeNode(item);
-                if (itemComplexType !== undefined) {
-                    // Elemento con complexType inline
-                    object[targetNamespace + ':' + item.name!] = complexTypeToObject(itemComplexType, currentNamespaces, object, targetNamespace, isQualified);
-                } else if (getSequenceNode(item) !== undefined) {
-                    // Elemento con sequence directamente (sin complexType wrapper)
-                    object[targetNamespace + ':' + item.name!] = complexTypeToObject(item, currentNamespaces, object, targetNamespace, isQualified);
-                }
-            }
-        } else {
-            const elementComplexType = getComplexTypeNode(elementNode as XmlNode);
-            if (elementComplexType !== undefined) {
-                // Elemento con complexType inline
-                object[targetNamespace + ':' + (elementNode as XmlNode).name!] = complexTypeToObject(elementComplexType, currentNamespaces, object, targetNamespace, isQualified);
-            } else if (getSequenceNode(elementNode as XmlNode) !== undefined) {
-                // Elemento con sequence directamente (sin complexType wrapper)
-                object[targetNamespace + ':' + (elementNode as XmlNode).name!] = complexTypeToObject(elementNode as XmlNode, currentNamespaces, object, targetNamespace, isQualified);
-            }
-        }
-    }
+    
+    // Procesar imports
+    await processImports(wsdlFile, node, currentNamespaces, object);
+    
+    // Procesar complexType nodes
+    processComplexTypeNodes(node, targetNamespace, currentNamespaces, object, isQualified);
+    
+    // Procesar element nodes con complexType inline o sequence
+    processElementNodes(node, targetNamespace, currentNamespaces, object, isQualified);
+    
     return object;
 };
 

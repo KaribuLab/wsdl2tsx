@@ -3,6 +3,13 @@ import { NAMESPACE_KEY, XML_SCHEMA_TYPES, XML_SCHEMA_URI } from "../constants.js
 import { extractLocalName, extractXmlSchemaType, getFilteredKeys, getTypeModifier, isValidInterfaceProperty } from "../utils.js";
 import { resolveTypeName, extractNestedComplexTypes } from "./type-resolver.js";
 import type { InterfaceData, TypeObject } from "../types.js";
+import {
+    processAdditionalComplexTypes,
+    processNestedTypesInComplexTypes,
+    processTopLevelTypes,
+    processRemainingTypes,
+    processMissingTypes
+} from "./interface-helpers.js";
 
 /**
  * Prepara datos de una interfaz TypeScript para el template
@@ -85,37 +92,30 @@ export function prepareInterfacesData(requestTypeObject: TypeObject, namespaceKe
     const extractionVisited = new Set<string>();
     const allComplexTypes = extractNestedComplexTypes(requestTypeObject, namespaceKey, xmlSchemaUri, extractionVisited);
     
-    // También incluir los tipos del nivel superior que son tipos complejos
-    const topLevelKeys = Object.keys(requestTypeObject)
-        .filter(key => {
-            if (key === namespaceKey) return false;
-            const typeDef = requestTypeObject[key]!;
-            // Incluir si es un objeto con type que es objeto (tipo complejo)
-            if (typeof typeDef === 'object' && typeDef !== null && 'type' in typeDef) {
-                const typeValue = (typeDef as any).type;
-                if (typeof typeValue === 'object' && typeValue !== null) {
-                    // Verificar que tenga propiedades además de $namespace
-                    const typeKeys = Object.keys(typeValue).filter(k => k !== '$namespace' && k !== '$base');
-                    return typeKeys.length > 0;
-                }
-            }
-            return false;
-        });
-    
-    // Procesar tipos del nivel superior
-    for (const key of topLevelKeys) {
-        const localName = extractLocalName(key);
-        // Convertir a PascalCase para comparación consistente
-        const interfaceName = toPascalCase(localName);
-        // Excluir tipos simples que ya se generan como export type
-        if (simpleTypeNames && simpleTypeNames.has(interfaceName)) {
-            continue;
-        }
-        if (!visited.has(interfaceName) && !interfaces.some(i => i.name === interfaceName)) {
-            visited.add(interfaceName);
-            interfaces.push(prepareInterfaceData(interfaceName, requestTypeObject[key] as any, allTypesForInterfaces));
-        }
+    // IMPORTANTE: También buscar tipos complejos que están en allTypesForInterfaces pero no en requestTypeObject
+    // Esto es necesario para tipos como ConsultarPerfilClienteResponseType que están referenciados
+    // pero no están directamente en requestTypeObject como propiedades con tipos complejos inline
+    if (allTypesForInterfaces) {
+        processAdditionalComplexTypes(
+            allTypesForInterfaces,
+            requestTypeObject,
+            namespaceKey,
+            xmlSchemaUri,
+            extractionVisited,
+            allComplexTypes
+        );
     }
+    
+    // Procesar tipos del nivel superior que son tipos complejos
+    processTopLevelTypes(
+        requestTypeObject,
+        namespaceKey,
+        allTypesForInterfaces,
+        simpleTypeNames,
+        visited,
+        interfaces,
+        prepareInterfaceData
+    );
     
     // Procesar tipos complejos anidados encontrados recursivamente
     for (const { interfaceName, typeObject } of allComplexTypes) {
@@ -129,95 +129,46 @@ export function prepareInterfacesData(requestTypeObject: TypeObject, namespaceKe
         }
     }
     
+    // IMPORTANTE: También procesar tipos complejos que están dentro de propiedades de tipos en allTypesForInterfaces
+    // Esto es necesario para tipos como ConsultarPerfilClienteResponseType que están dentro de respConsultarPerfilCliente
+    // como propiedades con tipos complejos anidados, pero no se están extrayendo correctamente
+    if (allTypesForInterfaces) {
+        processNestedTypesInComplexTypes(
+            allComplexTypes,
+            requestTypeObject,
+            namespaceKey,
+            xmlSchemaUri,
+            allTypesForInterfaces,
+            visited,
+            interfaces,
+            extractionVisited,
+            prepareInterfaceData
+        );
+    }
+    
     // IMPORTANTE: También procesar todos los tipos complejos que están directamente en requestTypeObject
     // pero que no fueron procesados como tipos del nivel superior (porque tienen nombres completos con namespace)
-    const remainingKeys = Object.keys(requestTypeObject)
-        .filter(key => {
-            if (key === namespaceKey || key === '$qualified') return false;
-            // Solo procesar si es un complexType (tiene estructura de tipo complejo)
-            const typeDef = requestTypeObject[key]!;
-            if (typeof typeDef === 'object' && typeDef !== null) {
-                // Si es un objeto con type que es objeto, es un tipo complejo
-                if ('type' in typeDef && typeof (typeDef as any).type === 'object') {
-                    const localName = extractLocalName(key);
-                    const interfaceName = toPascalCase(localName);
-                    // Verificar usando PascalCase y también si ya existe la interfaz
-                    return !visited.has(interfaceName) && !interfaces.some(i => i.name === interfaceName);
-                }
-                // Si es directamente un tipo complejo (sin wrapper type), también procesarlo
-                const keys = Object.keys(typeDef).filter(k => k !== '$namespace' && k !== '$base' && k !== '$qualified');
-                if (keys.length > 0) {
-                    const localName = extractLocalName(key);
-                    const interfaceName = toPascalCase(localName);
-                    return !visited.has(interfaceName) && !interfaces.some(i => i.name === interfaceName);
-                }
-            }
-            return false;
-        });
-    
-    for (const key of remainingKeys) {
-        const localName = extractLocalName(key);
-        const interfaceName = toPascalCase(localName);
-        // Excluir tipos simples que ya se generan como export type
-        if (simpleTypeNames && simpleTypeNames.has(interfaceName)) {
-            continue;
-        }
-        if (!visited.has(interfaceName) && !interfaces.some(i => i.name === interfaceName)) {
-            visited.add(interfaceName);
-            const typeDef = requestTypeObject[key]!;
-            
-            // Preparar la estructura correcta para prepareInterfaceData
-            if (typeof typeDef === 'object' && typeDef !== null && 'type' in typeDef && typeof (typeDef as any).type === 'object') {
-                interfaces.push(prepareInterfaceData(localName, typeDef as any, allTypesForInterfaces));
-            } else if (typeof typeDef === 'object' && typeDef !== null) {
-                // Es un tipo complejo directo
-                interfaces.push(prepareInterfaceData(localName, { type: typeDef } as any, allTypesForInterfaces));
-            }
-        }
-    }
+    processRemainingTypes(
+        requestTypeObject,
+        namespaceKey,
+        allTypesForInterfaces,
+        simpleTypeNames,
+        visited,
+        interfaces,
+        prepareInterfaceData
+    );
     
     // IMPORTANTE: También procesar tipos en allTypesForInterfaces que no están en requestTypeObject
     // Esto asegura que se generen interfaces para tipos como PlanTO que están referenciados pero no directamente en requestTypeObject
     if (allTypesForInterfaces) {
-        const allTypesKeys = Object.keys(allTypesForInterfaces).filter(k => 
-            k !== namespaceKey && k !== '$namespace' && k !== '$qualified' && k !== '$base'
+        processMissingTypes(
+            allTypesForInterfaces,
+            namespaceKey,
+            simpleTypeNames,
+            visited,
+            interfaces,
+            prepareInterfaceData
         );
-        const missingKeys = allTypesKeys.filter(key => {
-            const localName = extractLocalName(key);
-            const interfaceName = toPascalCase(localName);
-            return !visited.has(interfaceName) && !interfaces.some(i => i.name === interfaceName);
-        });
-        
-        for (const key of missingKeys) {
-            const localName = extractLocalName(key);
-            const interfaceName = toPascalCase(localName);
-            // Excluir tipos simples que ya se generan como export type
-            if (simpleTypeNames && simpleTypeNames.has(interfaceName)) {
-                continue;
-            }
-            if (!visited.has(interfaceName) && !interfaces.some(i => i.name === interfaceName)) {
-                visited.add(interfaceName);
-                const typeDef = allTypesForInterfaces[key]!;
-                
-                // Verificar que sea un tipo complejo antes de procesarlo
-                if (typeof typeDef === 'object' && typeDef !== null) {
-                    // Si es un objeto con type que es objeto, es un tipo complejo
-                    if ('type' in typeDef && typeof (typeDef as any).type === 'object') {
-                        const typeValue = (typeDef as any).type;
-                        const typeKeys = Object.keys(typeValue).filter(k => k !== '$namespace' && k !== '$base');
-                        if (typeKeys.length > 0) {
-                            interfaces.push(prepareInterfaceData(localName, typeDef as any, allTypesForInterfaces));
-                        }
-                    } else {
-                        // Es directamente un tipo complejo (sin wrapper type)
-                        const keys = Object.keys(typeDef).filter(k => k !== '$namespace' && k !== '$base');
-                        if (keys.length > 0) {
-                            interfaces.push(prepareInterfaceData(localName, { type: typeDef } as any, allTypesForInterfaces));
-                        }
-                    }
-                }
-            }
-        }
     }
     
     return interfaces;

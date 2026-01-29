@@ -1,9 +1,10 @@
 import type { XmlNode } from "../wsdl/types.js";
 import { extractAllNamespaceMappings, extractLocalName } from "../codegen/index.js";
-import { getRequestTypeFromOperation, getHeadersFromOperation, getOperationName } from "../wsdl/index.js";
+import { getRequestTypeFromOperation, getResponseTypeFromOperation, getHeadersFromOperation, getOperationName } from "../wsdl/index.js";
 import { prepareTemplateData } from "../codegen/data-preparer/index.js";
 import { findReferencedTypes } from "./type-resolution.js";
 import { compileTemplate } from "./template-compilation.js";
+import { warn, info, debugContext } from "../logger.js";
 import fs from "fs";
 import path from "path";
 
@@ -22,7 +23,7 @@ export function processOperation(
     
     if (!operationInfo) {
         const opName = getOperationName(operationNode);
-        console.warn(`⚠️  Operación '${opName}' no tiene input, se omite`);
+        warn(`⚠️  Operación '${opName}' no tiene input, se omite`);
         return;
     }
     
@@ -47,27 +48,24 @@ export function processOperation(
     // Esto asegura que se generen interfaces para tipos como CodigoPlanListTO que están referenciados
     const allTypesForInterfaces: any = { ...requestTypeObject };
     
-    const referencedTypeNames = findReferencedTypes(requestTypeObject, allComplexTypes);
+    const referencedTypeNames = findReferencedTypes(requestTypeObject, allComplexTypes, new Set(), 0, schemaObject);
+    
+    // Agregar los tipos referenciados encontrados a allTypesForInterfaces
+    for (const typeName of referencedTypeNames) {
+        if (!allTypesForInterfaces[typeName]) {
+            // Buscar primero en schemaObject, luego en allComplexTypes
+            const typeObject = schemaObject[typeName] || allComplexTypes[typeName];
+            if (typeObject) {
+                allTypesForInterfaces[typeName] = typeObject;
+            }
+        }
+    }
     
     // Agregar solo los tipos referenciados encontrados (no todos los tipos del WSDL)
     // Esto asegura que solo se generen interfaces para tipos realmente usados por esta operación
     for (const typeName of referencedTypeNames) {
         if (!allTypesForInterfaces[typeName] && allComplexTypes[typeName]) {
             allTypesForInterfaces[typeName] = allComplexTypes[typeName];
-        }
-    }
-    
-    // También incluir el tipo de respuesta si existe (ej: AddResponse)
-    // Buscar tipos de respuesta relacionados con esta operación
-    const responseTypeName = `${opName}Response`;
-    const responseTypeKeys = Object.keys(allComplexTypes).filter(k => {
-        const localName = extractLocalName(k);
-        return localName === responseTypeName || localName.toLowerCase() === responseTypeName.toLowerCase();
-    });
-    
-    for (const responseTypeKey of responseTypeKeys) {
-        if (!allTypesForInterfaces[responseTypeKey] && allComplexTypes[responseTypeKey]) {
-            allTypesForInterfaces[responseTypeKey] = allComplexTypes[responseTypeKey];
         }
     }
     
@@ -80,6 +78,77 @@ export function processOperation(
     const namespacesPrefixMapping = namespaceMappings.prefixesMapping;
     const namespacesTypeMapping = namespaceMappings.typesMapping;
     const baseNamespacePrefix = namespacesTypeMapping[requestType]!.prefix;
+    
+    // Intentar extraer el tipo de respuesta de la operación
+    let responseType: string | undefined;
+    let responseTypeObject: any | undefined;
+    let responseAllTypesForInterfaces: any | undefined;
+    
+    try {
+        const responseInfo = getResponseTypeFromOperation(operationNode, definitionsNode, schemaObject, allComplexTypes);
+        if (responseInfo) {
+            responseType = responseInfo.responseType;
+            responseTypeObject = schemaObject[responseType] as any;
+            
+            if (responseTypeObject) {
+                // Asegurar que el objeto tenga $namespace
+                if (!responseTypeObject['$namespace'] && schemaObject['$namespace']) {
+                    responseTypeObject['$namespace'] = schemaObject['$namespace'];
+                }
+                
+                // Incluir tipos referenciados en el response
+                responseAllTypesForInterfaces = { ...responseTypeObject };
+                const responseReferencedTypeNames = findReferencedTypes(responseTypeObject, allComplexTypes, new Set(), 0, schemaObject);
+                
+                // Buscar recursivamente dentro de los tipos encontrados
+                const allResponseTypes = new Set(responseReferencedTypeNames);
+                const processedTypes = new Set<string>();
+                
+                const processTypeRecursively = (typeName: string) => {
+                    if (processedTypes.has(typeName)) return;
+                    processedTypes.add(typeName);
+                    
+                    const typeObject = schemaObject[typeName] || allComplexTypes[typeName];
+                    if (typeObject) {
+                        if (!responseAllTypesForInterfaces[typeName]) {
+                            responseAllTypesForInterfaces[typeName] = typeObject;
+                        }
+                        
+                        // Buscar tipos referenciados dentro de este tipo
+                        const nestedTypes = findReferencedTypes(typeObject, allComplexTypes, new Set(), 0, schemaObject);
+                        for (const nestedTypeName of nestedTypes) {
+                            if (!allResponseTypes.has(nestedTypeName)) {
+                                allResponseTypes.add(nestedTypeName);
+                                processTypeRecursively(nestedTypeName);
+                            }
+                        }
+                    }
+                };
+                
+                // Procesar todos los tipos encontrados recursivamente
+                for (const typeName of responseReferencedTypeNames) {
+                    processTypeRecursively(typeName);
+                }
+                
+                // Agregar también los tipos del response a allTypesForInterfaces para que se generen sus interfaces
+                if (!allTypesForInterfaces[responseType]) {
+                    allTypesForInterfaces[responseType] = responseTypeObject;
+                }
+                for (const typeName of responseReferencedTypeNames) {
+                    if (!allTypesForInterfaces[typeName]) {
+                        // Buscar primero en schemaObject, luego en allComplexTypes
+                        const typeObject = schemaObject[typeName] || allComplexTypes[typeName];
+                        if (typeObject) {
+                            allTypesForInterfaces[typeName] = typeObject;
+                        }
+                    }
+                }
+            }
+        }
+    } catch (error: any) {
+        // Si no se puede extraer el response, continuar sin él (no es obligatorio)
+        warn(`⚠️  No se pudo extraer el tipo de respuesta para la operación '${opName}': ${error.message}`);
+    }
     
     // Preparar datos estructurados para el template Handlebars
     // IMPORTANTE: Para propsInterface usar solo requestTypeObject (no allTypesForInterfaces)
@@ -95,7 +164,10 @@ export function processOperation(
         allTypesForInterfaces, // Pasar allTypesForInterfaces como parámetro adicional para interfaces
         schemaObject, // Pasar schemaObject para resolver referencias de elementos
         allComplexTypes, // Pasar allComplexTypes para resolver tipos complejos referenciados
-        headersInfo // Pasar información de headers
+        headersInfo, // Pasar información de headers
+        responseType, // Pasar tipo de respuesta si existe
+        responseTypeObject, // Pasar objeto de tipo de respuesta si existe
+        responseAllTypesForInterfaces // Pasar tipos referenciados del response
     );
     
     // Compilar el template y generar el código
@@ -111,5 +183,5 @@ export function processOperation(
     
     const outputPath = path.join(outDir, `${typeNameForFile}.tsx`);
     fs.writeFileSync(outputPath, generatedCode);
-    console.log(`✅ Archivo ${typeNameForFile}.tsx generado correctamente en ${outDir}`);
+    info(`✅ Archivo ${typeNameForFile}.tsx generado correctamente en ${outDir}`);
 }

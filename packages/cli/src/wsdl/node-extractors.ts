@@ -147,6 +147,11 @@ export const getInputNode = (node: XmlNode): XmlNode | undefined => {
     return node[inputField!];
 };
 
+export const getOutputNode = (node: XmlNode): XmlNode | undefined => {
+    const outputField = Object.keys(node).find(objectField => objectField.match(/([a-zA-z0-9]*:)?output/));
+    return node[outputField!];
+};
+
 export const getPartNode = (node: XmlNode): XmlNode | XmlNode[] | undefined => {
     const partField = Object.keys(node).find(objectField => objectField.match(/([a-zA-z0-9]*:)?part/));
     if (!partField) return undefined;

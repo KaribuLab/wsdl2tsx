@@ -102,7 +102,8 @@ export async function generateTsxFromWsdl(
             generatedCount++;
         } catch (error: any) {
             const opName = getOperationName(operationNode);
-            console.error(`❌ Error al procesar operación '${opName}':`, error.message);
+            const { error: logError } = await import("./logger.js");
+            logError(`❌ Error al procesar operación '${opName}': ${error.message}`);
             // Si se especificó una operación específica, lanzar el error
             if (operationName) {
                 throw error;
@@ -115,5 +116,6 @@ export async function generateTsxFromWsdl(
         throw new Error('No se generó ningún archivo. Verifica que las operaciones tengan input definido.');
     }
     
-    console.log(`\n✨ Proceso completado: ${generatedCount} archivo(s) generado(s)`);
+    const { info } = await import("./logger.js");
+    info(`\n✨ Proceso completado: ${generatedCount} archivo(s) generado(s)`);
 }

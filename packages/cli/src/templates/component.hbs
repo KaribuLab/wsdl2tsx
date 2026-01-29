@@ -21,6 +21,15 @@ export interface {{pascalCase name}} {
 {{/each}}
 }
 {{/each}}
+
+{{#if responseType}}
+export interface {{pascalCase responseType}}Props {
+{{#each responsePropsInterface.properties}}
+	{{camelCase name}}: {{type}}{{#unless @last}},{{/unless}}
+{{/each}}
+}
+{{/if}}
+
 export function {{pascalCase requestType}}(props: {{pascalCase requestType}}Props) {
     return <soap.Envelope xmlns:soap="{{soapNamespaceURI}}"
     {{xmlnsAttributes xmlnsAttributes}}>

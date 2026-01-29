@@ -1,6 +1,7 @@
 import { extractNamespacePrefix, extractLocalName, getFilteredKeys } from "./utils.js";
 import { NAMESPACE_KEY } from "./constants.js";
 import type { TypeObject, CombinedNamespaceMappings, NamespaceTagsMapping, NamespacePrefixesMapping, NamespaceTypesMapping, NamespaceInfo } from "./types.js";
+import { extractNestedTags, flattenKeysWithNamespace } from "./namespace-helpers.js";
 
 /**
  * Extrae todos los mappings de namespace en una sola pasada sobre los datos
@@ -46,75 +47,6 @@ export function extractAllNamespaceMappings(
     };
     
     const keys = getFilteredKeys(baseTypeObject);
-    
-    // Función auxiliar recursiva para extraer tags anidados (solo si son qualified)
-    const extractNestedTags = (typeObject: TypeObject): string[] => {
-        const result: string[] = [];
-        const nestedKeys = getFilteredKeys(typeObject);
-        const isQualified = typeObject.$qualified === true;
-        
-        for (const nestedKey of nestedKeys) {
-            const nestedElement = typeObject[nestedKey]!;
-            // Solo agregar el tag si es qualified
-            if (isQualified) {
-                const tagLocalName = extractLocalName(nestedKey);
-                result.push(tagLocalName);
-            }
-            
-            if (typeof nestedElement === 'object' && nestedElement !== null && typeof nestedElement.type === 'object') {
-                // También agregar tags anidados recursivamente
-                const nestedTags = extractNestedTags(nestedElement.type as TypeObject);
-                result.push(...nestedTags);
-            }
-        }
-        
-        return result;
-    };
-    
-    // Función auxiliar recursiva para aplanar claves con información de namespace
-    const flattenKeys = (
-        typeObject: TypeObject,
-        currentNamespace: string,
-        currentNamespacePrefix: string
-    ): Array<{ name: string; uri: string; prefix: string }> => {
-        const result: Array<{ name: string; uri: string; prefix: string }> = [];
-        const objKeys = getFilteredKeys(typeObject);
-        
-        for (const objKey of objKeys) {
-            const objElement = typeObject[objKey]!;
-            
-            if (typeof objElement === 'object' && objElement !== null && typeof objElement.type === 'object') {
-                const objNamespace = (objElement.type as TypeObject)[NAMESPACE_KEY];
-                if (!objNamespace) {
-                    // Si no tiene namespace, usar el namespace actual
-                    result.push({
-                        name: objKey,
-                        uri: currentNamespace,
-                        prefix: currentNamespacePrefix,
-                    });
-                    continue;
-                }
-                const objNamespacePrefix = extractNamespacePrefix(objNamespace);
-                
-                const nested = flattenKeys(objElement.type as TypeObject, objNamespace, objNamespacePrefix);
-                result.push(...nested);
-                
-                result.push({
-                    name: objKey,
-                    uri: objNamespace,
-                    prefix: objNamespacePrefix,
-                });
-            } else {
-                result.push({
-                    name: objKey,
-                    uri: currentNamespace,
-                    prefix: currentNamespacePrefix,
-                });
-            }
-        }
-        
-        return result;
-    };
     
     // Una sola iteración sobre las claves principales
     for (const key of keys) {
@@ -162,8 +94,8 @@ export function extractAllNamespaceMappings(
         }
     }
     
-    // Construir typesMapping usando flattenKeys
-    const flatKeys = flattenKeys(baseTypeObject, baseNamespace, baseNamespacePrefix);
+    // Construir typesMapping usando flattenKeysWithNamespace
+    const flatKeys = flattenKeysWithNamespace(baseTypeObject, baseNamespace, baseNamespacePrefix);
     for (const item of flatKeys) {
         typesMapping[item.name] = {
             uri: item.uri,
