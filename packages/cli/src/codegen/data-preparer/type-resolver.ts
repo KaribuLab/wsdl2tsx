@@ -23,7 +23,17 @@ export function resolveTypeName(
     const isXmlSchemaType = referencedType.includes('http://www.w3.org/2001/XMLSchema');
     const isSimpleTypeByName = localTypeName in XML_SCHEMA_TYPES;
     
-    if (isXsdType || isXmlSchemaType || isSimpleTypeByName) {
+    // También verificar si el nombre local es un tipo simple conocido de XML Schema
+    // incluso si viene con un namespace personalizado (ej: "http://cualquier-namespace:decimal")
+    const xmlSchemaSimpleTypes = ['string', 'int', 'float', 'double', 'boolean', 'date', 'time', 'dateTime', 
+                                  'decimal', 'integer', 'long', 'short', 'byte', 'unsignedInt', 'unsignedLong',
+                                  'unsignedShort', 'unsignedByte', 'duration', 'gYearMonth', 'gYear', 'gMonthDay',
+                                  'gDay', 'gMonth', 'token', 'normalizedString', 'NMTOKEN', 'NMTOKENS', 'Name',
+                                  'NCName', 'QName', 'ID', 'IDREF', 'IDREFS', 'ENTITY', 'ENTITIES', 'language',
+                                  'anyURI', 'base64Binary', 'hexBinary'];
+    const isSimpleTypeByLocalName = xmlSchemaSimpleTypes.includes(localTypeName.toLowerCase());
+    
+    if (isXsdType || isXmlSchemaType || isSimpleTypeByName || isSimpleTypeByLocalName) {
         // Extraer el nombre del tipo correctamente
         let xmlSchemaType: string;
         if (referencedType.includes('xsd:')) {
@@ -34,11 +44,19 @@ export function resolveTypeName(
             xmlSchemaType = localTypeName;
         } else {
             // Formato: "http://cualquier-namespace:string" - usar el nombre local
-            xmlSchemaType = localTypeName;
+            xmlSchemaType = localTypeName.toLowerCase();
         }
         
+        // Mapear tipos simples comunes
         if (XML_SCHEMA_TYPES[xmlSchemaType]) {
             return XML_SCHEMA_TYPES[xmlSchemaType];
+        } else if (['decimal', 'integer', 'long', 'short', 'byte', 'unsignedint', 'unsignedlong', 
+                     'unsignedshort', 'unsignedbyte', 'int'].includes(xmlSchemaType)) {
+            return 'number';
+        } else if (xmlSchemaType === 'boolean') {
+            return 'boolean';
+        } else if (['date', 'time', 'datetime'].includes(xmlSchemaType)) {
+            return 'Date';
         } else {
             return 'string'; // Fallback para tipos XML Schema no mapeados
         }
@@ -87,7 +105,31 @@ export function resolveTypeName(
         }
     }
     
-    // Si no se encuentra, usar el nombre de la propiedad en PascalCase como fallback
+    // Si no se encuentra, verificar si el tipo referenciado parece ser un tipo simple
+    // Tipos simples comunes que no están en XML_SCHEMA_TYPES pero deberían ser string o number
+    const localTypeNameLower = localTypeName.toLowerCase();
+    const simpleTypePatterns = [
+        /^(decimal|double|float|int|integer|long|short|byte)$/i,
+        /^(string|token|normalizedString|NMTOKEN|NMTOKENS|Name|NCName|QName|ID|IDREF|IDREFS|ENTITY|ENTITIES|language|anyURI|base64Binary|hexBinary|duration|dateTime|date|time|gYearMonth|gYear|gMonthDay|gDay|gMonth)$/i,
+        /^(boolean)$/i
+    ];
+    
+    // Si el nombre local coincide con un patrón de tipo simple, resolverlo como tal
+    for (const pattern of simpleTypePatterns) {
+        if (pattern.test(localTypeName)) {
+            if (/^(decimal|double|float|int|integer|long|short|byte)$/i.test(localTypeName)) {
+                return 'number';
+            }
+            if (/^(boolean)$/i.test(localTypeName)) {
+                return 'boolean';
+            }
+            // Por defecto, tipos simples son string
+            return 'string';
+        }
+    }
+    
+    // Si no se encuentra y no es un tipo simple conocido, usar el nombre de la propiedad en PascalCase como fallback
+    // Esto puede generar errores de tipo, pero es mejor que fallar completamente
     const fallbackName = toPascalCase(propName);
     return fallbackName;
 }

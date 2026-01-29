@@ -17,7 +17,7 @@ export interface {{pascalCase requestType}}Props {
 {{#each interfaces}}
 export interface {{pascalCase name}} {
 {{#each properties}}
-	{{camelCase name}}: {{type}}{{#if modifier}}{{modifier}}{{/if}}{{#unless @last}},{{/unless}}
+	{{camelCase name}}{{#if (eq modifier "?")}}?{{/if}}: {{type}}{{#if (eq modifier "[]")}}[]{{/if}}{{#unless @last}},{{/unless}}
 {{/each}}
 }
 {{/each}}

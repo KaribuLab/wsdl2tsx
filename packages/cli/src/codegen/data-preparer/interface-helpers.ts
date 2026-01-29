@@ -206,8 +206,101 @@ export function processNestedTypesInComplexTypes(
     prepareInterfaceData: (name: string, def: any, allTypes?: TypeObject) => any
 ): void {
     // Procesar también tipos que están directamente en allTypesForInterfaces como propiedades de otros tipos
-    for (const { typeObject } of allComplexTypes) {
+    debugContext("processNestedTypesInComplexTypes", `Procesando tipos anidados en ${allComplexTypes.length} tipo(s) complejo(s)`);
+    debugContext("processNestedTypesInComplexTypes", `Tipos complejos: ${allComplexTypes.map(ct => ct.interfaceName).join(', ')}`);
+    
+    // IMPORTANTE: También procesar tipos que están en allTypesForInterfaces pero no en allComplexTypes
+    // Esto es necesario para tipos como RespConsultarPerfilCliente que están en allTypesForInterfaces
+    // pero pueden no estar en allComplexTypes si no fueron extraídos desde requestTypeObject
+    const allTypesKeys = Object.keys(allTypesForInterfaces).filter(k => 
+        k !== namespaceKey && k !== '$namespace' && k !== '$qualified' && k !== '$base'
+    );
+    const complexTypesMap = new Map(allComplexTypes.map(ct => [ct.interfaceName, ct.typeObject]));
+    
+    for (const key of allTypesKeys) {
+        const localName = extractLocalName(key);
+        const interfaceName = toPascalCase(localName);
+        
+        // Si el tipo ya está en allComplexTypes, usar ese; si no, extraerlo de allTypesForInterfaces
+        let typeObject: TypeObject | undefined = complexTypesMap.get(interfaceName);
+        if (!typeObject) {
+            const typeDef = allTypesForInterfaces[key]!;
+            typeObject = extractTypeObject(typeDef);
+        }
+        
+        if (typeObject) {
+            const typeObjectKeys = Object.keys(typeObject).filter(k => k !== '$namespace' && k !== '$base' && k !== '$qualified');
+            debugContext("processNestedTypesInComplexTypes", `Revisando "${interfaceName}" con ${typeObjectKeys.length} propiedad(es): ${typeObjectKeys.slice(0, 5).join(', ')}${typeObjectKeys.length > 5 ? '...' : ''}`);
+            for (const propKey of typeObjectKeys) {
+                const propDef = typeObject[propKey]!;
+                if (typeof propDef === 'object' && propDef !== null && 'type' in propDef) {
+                    const propTypeValue = (propDef as any).type;
+                    // Si type es un objeto (tipo complejo anidado), verificar si está en allTypesForInterfaces
+                    if (typeof propTypeValue === 'object' && propTypeValue !== null) {
+                        const propTypeKeys = Object.keys(propTypeValue).filter(k => k !== '$namespace' && k !== '$base' && k !== '$qualified');
+                        if (propTypeKeys.length > 0) {
+                            const propLocalName = extractLocalName(propKey);
+                            const propInterfaceName = toPascalCase(propLocalName);
+                            debugContext("processNestedTypesInComplexTypes", `  → Propiedad "${propKey}" tiene tipo complejo anidado (${propTypeKeys.length} propiedades), procesando como "${propInterfaceName}"`);
+                            
+                            processNestedComplexTypesInProperty(
+                                propKey,
+                                propTypeValue as TypeObject,
+                                propInterfaceName,
+                                namespaceKey,
+                                xmlSchemaUri,
+                                allTypesForInterfaces,
+                                visited,
+                                interfaces,
+                                extractionVisited,
+                                prepareInterfaceData
+                            );
+                        }
+                    } else if (typeof propTypeValue === 'string') {
+                        // Tipo referenciado por string - verificar si está en allTypesForInterfaces
+                        const propLocalName = extractLocalName(propKey);
+                        const propInterfaceName = toPascalCase(propLocalName);
+                        debugContext("processNestedTypesInComplexTypes", `  → Propiedad "${propKey}" referencia tipo "${propTypeValue}", buscando como "${propInterfaceName}"`);
+                        
+                        // IMPORTANTE: Si el tipo referenciado no existe en allTypesForInterfaces, podría ser un tipo complejo inline
+                        // que necesita ser extraído. Buscar si existe en schemaObject o allComplexTypes
+                        const matchingTypeKey = findMatchingTypeKey(propKey, propInterfaceName, allTypesForInterfaces);
+                        if (!matchingTypeKey && propKey.toLowerCase().includes('responsetype')) {
+                            debugContext("processNestedTypesInComplexTypes", `  ⚠️  Tipo "${propInterfaceName}" no encontrado en allTypesForInterfaces, podría ser un tipo complejo inline que necesita extracción`);
+                        }
+                    }
+                } else if (typeof propDef === 'object' && propDef !== null) {
+                    // Propiedad sin 'type' pero es un objeto - podría ser un tipo complejo directo (inline)
+                    // Verificar si tiene propiedades que indiquen que es un tipo complejo
+                    const propDefKeys = Object.keys(propDef).filter(k => k !== '$namespace' && k !== '$base' && k !== '$qualified');
+                    if (propDefKeys.length > 0) {
+                        const propLocalName = extractLocalName(propKey);
+                        const propInterfaceName = toPascalCase(propLocalName);
+                        debugContext("processNestedTypesInComplexTypes", `  → Propiedad "${propKey}" es tipo complejo inline (${propDefKeys.length} propiedades), procesando como "${propInterfaceName}"`);
+                        
+                        // Procesar como tipo complejo inline
+                        processNestedComplexTypesInProperty(
+                            propKey,
+                            propDef as TypeObject,
+                            propInterfaceName,
+                            namespaceKey,
+                            xmlSchemaUri,
+                            allTypesForInterfaces,
+                            visited,
+                            interfaces,
+                            extractionVisited,
+                            prepareInterfaceData
+                        );
+                    }
+                }
+            }
+        }
+    }
+    
+    // También procesar tipos que están en allComplexTypes (código original)
+    for (const { interfaceName, typeObject } of allComplexTypes) {
         const typeObjectKeys = Object.keys(typeObject).filter(k => k !== '$namespace' && k !== '$base' && k !== '$qualified');
+        debugContext("processNestedTypesInComplexTypes", `Revisando "${interfaceName}" con ${typeObjectKeys.length} propiedad(es): ${typeObjectKeys.slice(0, 5).join(', ')}${typeObjectKeys.length > 5 ? '...' : ''}`);
         for (const propKey of typeObjectKeys) {
             const propDef = typeObject[propKey]!;
             if (typeof propDef === 'object' && propDef !== null && 'type' in propDef) {
@@ -218,6 +311,7 @@ export function processNestedTypesInComplexTypes(
                     if (propTypeKeys.length > 0) {
                         const propLocalName = extractLocalName(propKey);
                         const propInterfaceName = toPascalCase(propLocalName);
+                        debugContext("processNestedTypesInComplexTypes", `  → Propiedad "${propKey}" tiene tipo complejo anidado, procesando como "${propInterfaceName}"`);
                         
                         processNestedComplexTypesInProperty(
                             propKey,
@@ -232,6 +326,11 @@ export function processNestedTypesInComplexTypes(
                             prepareInterfaceData
                         );
                     }
+                } else if (typeof propTypeValue === 'string') {
+                    // Tipo referenciado por string - verificar si está en allTypesForInterfaces
+                    const propLocalName = extractLocalName(propKey);
+                    const propInterfaceName = toPascalCase(propLocalName);
+                    debugContext("processNestedTypesInComplexTypes", `  → Propiedad "${propKey}" referencia tipo "${propTypeValue}", buscando como "${propInterfaceName}"`);
                 }
             }
         }
