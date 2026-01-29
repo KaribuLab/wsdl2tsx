@@ -90,11 +90,16 @@ export function extractAllTagsForXmlBody(
                 
                 // Buscar el tipo referenciado en schemaObject o allComplexTypes
                 let referencedTypeObject = schemaObject?.[referencedType] || allComplexTypes?.[referencedType];
+                let foundKey: string | undefined;
                 
-                // Si no se encuentra exactamente, buscar por nombre local
-                if (!referencedTypeObject) {
+                // Si se encuentra exactamente, usar la clave directamente
+                if (referencedTypeObject) {
+                    foundKey = referencedType;
+                } else {
+                    // Si no se encuentra exactamente, buscar por nombre local
                     const referencedLocalName = referencedType.split(':').pop() || referencedType;
-                    const matchingKey = Object.keys(schemaObject || {}).find(k => {
+                    foundKey = Object.keys(schemaObject || {}).find(k => {
+                        if (k === '$namespace' || k === '$qualified') return false;
                         const kLocalName = k.split(':').pop();
                         return kLocalName === referencedLocalName;
                     }) || Object.keys(allComplexTypes || {}).find(k => {
@@ -102,9 +107,9 @@ export function extractAllTagsForXmlBody(
                         return kLocalName === referencedLocalName;
                     });
                     
-                    if (matchingKey) {
-                        referencedTypeObject = schemaObject?.[matchingKey] || allComplexTypes?.[matchingKey];
-                        debugContext("extractAllTagsForXmlBody", `Tipo referenciado encontrado por nombre local: "${matchingKey}"`);
+                    if (foundKey) {
+                        referencedTypeObject = schemaObject?.[foundKey] || allComplexTypes?.[foundKey];
+                        debugContext("extractAllTagsForXmlBody", `Tipo referenciado encontrado por nombre local: "${foundKey}"`);
                     }
                 }
                 
@@ -122,11 +127,48 @@ export function extractAllTagsForXmlBody(
                                 debugContext("extractAllTagsForXmlBody", `Registrando namespace del tipo referenciado: "${refNamespacePrefix}" -> "${refNamespace}"`);
                             }
                         }
-                        // Si el tipo referenciado tiene un wrapper 'type', extraer el contenido
-                        if ('type' in referencedTypeObject && typeof referencedTypeObject.type === 'object') {
-                            elementTypeValue = referencedTypeObject.type;
+                    }
+                    
+                    // Obtener el namespace del elemento referenciado ANTES de extraer el contenido del wrapper 'type'
+                    // El tag del elemento referenciado pertenece al namespace donde está definido el elemento
+                    let referencedElementNamespace: string | undefined;
+                    
+                    // Primero intentar obtener el namespace desde la clave donde está almacenado
+                    if (foundKey && foundKey.includes(':')) {
+                        const [nsPart] = foundKey.split(':');
+                        // Si nsPart parece ser un URI completo (empieza con http:// o https://), usarlo directamente
+                        if (nsPart.startsWith('http://') || nsPart.startsWith('https://')) {
+                            referencedElementNamespace = nsPart;
+                            debugContext("extractAllTagsForXmlBody", `Namespace del elemento referenciado obtenido de la clave "${foundKey}": "${referencedElementNamespace}"`);
                         }
                     }
+                    
+                    // Si no se obtuvo de la clave, intentar obtenerlo del $namespace del objeto referenciado
+                    if (!referencedElementNamespace && referencedTypeObject && typeof referencedTypeObject === 'object') {
+                        const refNamespace = referencedTypeObject[NAMESPACE_KEY];
+                        if (refNamespace && typeof refNamespace === 'string') {
+                            referencedElementNamespace = refNamespace;
+                            debugContext("extractAllTagsForXmlBody", `Namespace del elemento referenciado obtenido del $namespace del objeto: "${referencedElementNamespace}"`);
+                        }
+                    }
+                    
+                    // Si el tipo referenciado tiene un wrapper 'type', extraer el contenido
+                    // PERO preservar el _referencedElementNamespace si existe
+                    if (referencedTypeObject && typeof referencedTypeObject === 'object' && 'type' in referencedTypeObject && typeof referencedTypeObject.type === 'object') {
+                        elementTypeValue = referencedTypeObject.type;
+                        // Preservar el _referencedElementNamespace en el nuevo elementTypeValue
+                        if (referencedElementNamespace) {
+                            (elementTypeValue as any)._referencedElementNamespace = referencedElementNamespace;
+                        }
+                    }
+                    
+                    // Si encontramos el namespace del elemento referenciado, guardarlo también en referencedTypeObject
+                    // para que esté disponible en ambos lugares
+                    if (referencedElementNamespace) {
+                        (referencedTypeObject as any)._referencedElementNamespace = referencedElementNamespace;
+                        debugContext("extractAllTagsForXmlBody", `Namespace del elemento referenciado "${tagLocalName}" guardado: "${referencedElementNamespace}"`);
+                    }
+                    
                     debugContext("extractAllTagsForXmlBody", `✓ Tipo referenciado resuelto para "${tagLocalName}" (elemento en namespace: "${elementNamespace || currentNamespace}", tipo en namespace: "${referencedTypeObject[NAMESPACE_KEY] || 'N/A'}")`);
                 } else {
                     debugContext("extractAllTagsForXmlBody", `✗ Tipo referenciado no encontrado: "${referencedType}"`);
@@ -136,8 +178,31 @@ export function extractAllTagsForXmlBody(
             }
         }
         
-        // Usar el namespace del ELEMENTO, no del tipo referenciado
-        const namespace = elementNamespace || currentNamespace;
+        // Determinar el namespace correcto para el tag
+        // Si el elemento tiene un tipo referenciado, el tag debe agregarse al namespace del elemento referenciado
+        // (porque ese es el namespace donde está definido el elemento)
+        // Si no tiene tipo referenciado, usar el namespace del elemento mismo
+        let tagNamespace = elementNamespace || currentNamespace;
+        
+        // Si el elemento tiene un tipo referenciado, usar el namespace del elemento referenciado para el tag
+        if (elementTypeValue && typeof elementTypeValue === 'object' && elementTypeValue !== null) {
+            // Primero intentar obtener el namespace desde _referencedElementNamespace (guardado durante la resolución)
+            const referencedElementNamespace = (elementTypeValue as any)._referencedElementNamespace;
+            if (referencedElementNamespace && typeof referencedElementNamespace === 'string') {
+                // El tag pertenece al namespace del elemento referenciado, no al namespace del elemento padre
+                tagNamespace = referencedElementNamespace;
+                debugContext("extractAllTagsForXmlBody", `Tag "${tagLocalName}" pertenece al namespace del elemento referenciado: "${tagNamespace}"`);
+            } else {
+                // Fallback: intentar obtener el namespace del tipo referenciado
+                const referencedTypeNamespace = (elementTypeValue as any)[NAMESPACE_KEY];
+                if (referencedTypeNamespace && typeof referencedTypeNamespace === 'string') {
+                    tagNamespace = referencedTypeNamespace;
+                    debugContext("extractAllTagsForXmlBody", `Tag "${tagLocalName}" pertenece al namespace del tipo referenciado: "${tagNamespace}"`);
+                }
+            }
+        }
+        
+        const namespace = tagNamespace;
         const namespacePrefix = extractNamespacePrefix(namespace);
         
         // Registrar el namespace si es diferente del base
@@ -146,14 +211,13 @@ export function extractAllTagsForXmlBody(
             debugContext("extractAllTagsForXmlBody", `Registrando namespace del elemento: "${namespacePrefix}" -> "${namespace}"`);
         }
         
-        // IMPORTANTE: El tag debe agregarse al namespace del ELEMENTO, no al namespace del tipo referenciado
-        // El elemento puede estar en un namespace diferente al tipo que referencia
-        // Agregar el tag al namespace correspondiente (puede ser el base o un namespace diferente)
-        // Esto incluye tanto elementos qualified como no qualified que se usarán en el XML
-        debugContext("extractAllTagsForXmlBody", `Agregando tag "${tagLocalName}" al namespace "${namespacePrefix}" (namespace del elemento: "${namespace}")`);
+        // IMPORTANTE: El tag debe agregarse al namespace correcto
+        // Si el elemento tiene un tipo referenciado, el tag pertenece al namespace del tipo referenciado
+        // Si no, pertenece al namespace del elemento mismo
+        debugContext("extractAllTagsForXmlBody", `Agregando tag "${tagLocalName}" al namespace "${namespacePrefix}" (namespace: "${namespace}")`);
         result.push(tagLocalName);
         
-        // Registrar el tag en el namespace del ELEMENTO (no del tipo referenciado)
+        // Registrar el tag en el namespace correcto
         if (!tagsByNamespace.has(namespace)) {
             tagsByNamespace.set(namespace, []);
         }

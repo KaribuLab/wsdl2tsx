@@ -1,8 +1,9 @@
 import { extractNamespacePrefix, extractLocalName, getFilteredKeys } from "./utils.js";
 import { NAMESPACE_KEY } from "./constants.js";
 import { debugContext } from "../logger.js";
-import type { TypeObject, CombinedNamespaceMappings, NamespaceTagsMapping, NamespacePrefixesMapping, NamespaceTypesMapping, NamespaceInfo } from "./types.js";
+import type { TypeObject, CombinedNamespaceMappings, NamespaceTagsMapping, NamespacePrefixesMapping, NamespaceTypesMapping, NamespaceInfo, TagUsageCollector } from "./types.js";
 import { extractNestedTags, flattenKeysWithNamespace, extractAllTagsForXmlBody } from "./namespace-helpers.js";
+import { generateXmlBodyCode } from "./xml-generator/index.js";
 
 /**
  * Extrae todos los mappings de namespace en una sola pasada sobre los datos
@@ -160,65 +161,101 @@ export function extractAllNamespaceMappings(
         }
     }
     
-    // Agregar tags al namespace correspondiente según su namespace real
-    // IMPORTANTE: Solo agregar tags que no estén ya en otro namespace para evitar duplicados
+    // FLUJO SECUENCIAL: Primero generar el XML para recolectar qué tags se usan con qué prefijos
+    // Esto garantiza que el tagsMapping coincida exactamente con el XML generado
+    const tagUsageCollector: TagUsageCollector = {
+        tagToPrefix: new Map<string, string>(),
+        prefixToNamespace: new Map<string, string>()
+    };
+    
+    // Generar el XML temporalmente solo para recolectar información de tags usados
+    // No necesitamos el XML aquí, solo la información recolectada
+    // IMPORTANTE: prefixesMapping debe estar completo antes de generar el XML
+    generateXmlBodyCode(
+        baseNamespacePrefix,
+        typesMapping,
+        baseTypeName,
+        baseTypeObject,
+        undefined, // propsInterfaceName
+        schemaObject,
+        allComplexTypes,
+        prefixesMapping,
+        tagUsageCollector
+    );
+    
+    // Limpiar tagsMapping anterior (construido de forma predictiva) y reconstruirlo desde el uso real
+    // Esto asegura que los tags estén en los namespaces correctos según su uso real en el XML
+    const newTagsMapping: NamespaceTagsMapping = {};
+    
+    // Construir tagsMapping basado en la información recolectada del XML generado
+    // Agrupar tags por su prefijo real usado en el XML
+    const prefixToTags = new Map<string, Set<string>>();
+    const tagToPrefixMap = new Map<string, string>(); // Para rastrear qué tag está en qué prefijo (evitar duplicados)
+    
+    // Inicializar sets para cada prefijo encontrado
+    // Filtrar propiedades internas que no son tags XML (como _referencedElementNamespace)
+    for (const [tag, prefix] of tagUsageCollector.tagToPrefix) {
+        // Filtrar propiedades internas que empiezan con _
+        if (tag.startsWith('_')) {
+            continue;
+        }
+        
+        // Si el tag ya está en otro prefijo, usar el último encontrado (el más específico)
+        // Esto puede pasar si un tag se registra múltiples veces durante la generación
+        if (tagToPrefixMap.has(tag)) {
+            const existingPrefix = tagToPrefixMap.get(tag)!;
+            // Si el nuevo prefijo es diferente, preferir el que corresponde al namespace del elemento referenciado
+            // (generalmente el más específico)
+            if (existingPrefix !== prefix) {
+                debugContext("extractAllNamespaceMappings", `Tag "${tag}" encontrado en múltiples prefijos: "${existingPrefix}" y "${prefix}", usando "${prefix}"`);
+            }
+        }
+        
+        tagToPrefixMap.set(tag, prefix);
+        
+        if (!prefixToTags.has(prefix)) {
+            prefixToTags.set(prefix, new Set<string>());
+        }
+        prefixToTags.get(prefix)!.add(tag);
+    }
+    
+    // Construir tagsMapping desde la información recolectada
+    // Asegurar que cada tag solo aparezca en un namespace (el correcto)
     const allTagsAdded = new Set<string>();
-    for (const [nsUri, tags] of xmlBodyResult.tagsByNamespace) {
-        // Buscar si ya existe un prefijo para este URI
-        let finalPrefix: string | undefined;
-        for (const [p, u] of Object.entries(prefixesMapping)) {
-            if (u === nsUri) {
-                finalPrefix = p;
-                break;
+    for (const [prefix, tagsSet] of prefixToTags) {
+        const tagsArray = Array.from(tagsSet).filter(tag => {
+            // Solo incluir tags que no hayan sido agregados a otro namespace
+            if (allTagsAdded.has(tag)) {
+                return false;
             }
-        }
+            allTagsAdded.add(tag);
+            return true;
+        });
         
-        // Si no existe, generar uno nuevo
-        if (!finalPrefix) {
-            finalPrefix = extractNamespacePrefix(nsUri, existingPrefixesSet);
-            existingPrefixesSet.add(finalPrefix);
-        }
-        
-        if (!tagsMapping[finalPrefix]) {
-            tagsMapping[finalPrefix] = [];
-        }
-        
-        // Agregar tags que no estén ya en el array y que no hayan sido agregados a otro namespace
-        const existingTags = new Set(tagsMapping[finalPrefix] || []);
-        const tagsToAdd: string[] = [];
-        for (const tag of tags) {
-            // Solo agregar si no está en este namespace Y no ha sido agregado a otro namespace
-            if (!existingTags.has(tag) && !allTagsAdded.has(tag)) {
-                tagsToAdd.push(tag);
-                allTagsAdded.add(tag);
-            }
-        }
-        
-        if (tagsToAdd.length > 0) {
-            tagsMapping[finalPrefix]!.push(...tagsToAdd);
-            debugContext("extractAllNamespaceMappings", `Agregando ${tagsToAdd.length} tag(s) al namespace "${finalPrefix}" (${nsUri}): ${tagsToAdd.join(', ')}`);
+        if (tagsArray.length > 0) {
+            newTagsMapping[prefix] = tagsArray;
+            debugContext("extractAllNamespaceMappings", `Agregando ${tagsArray.length} tag(s) al namespace "${prefix}" basado en uso real en XML: ${tagsArray.join(', ')}`);
         }
     }
     
-    // Solo agregar tags al namespace base si pertenecen al namespace base
-    // No agregar tags que ya fueron asignados a otros namespaces
-    const baseNamespaceTags = xmlBodyResult.tagsByNamespace.get(baseNamespace);
-    if (baseNamespaceTags && baseNamespaceTags.length > 0) {
-        if (tagsMapping[baseNamespacePrefix] === undefined) {
-            tagsMapping[baseNamespacePrefix] = [];
-            prefixesMapping[baseNamespacePrefix] = baseNamespace;
+    // También asegurar que los prefijos usados tengan su namespace registrado en prefixesMapping
+    for (const [prefix, namespaceUri] of tagUsageCollector.prefixToNamespace) {
+        if (!prefixesMapping[prefix]) {
+            prefixesMapping[prefix] = namespaceUri;
+            debugContext("extractAllNamespaceMappings", `Registrando namespace para prefijo "${prefix}": "${namespaceUri}"`);
         }
-        
-        // Agregar solo los tags que pertenecen al namespace base
-        const existingTags = new Set(tagsMapping[baseNamespacePrefix] || []);
-        for (const tag of baseNamespaceTags) {
-            if (!existingTags.has(tag)) {
-                tagsMapping[baseNamespacePrefix]!.push(tag);
-                existingTags.add(tag);
-            }
-        }
-        debugContext("extractAllNamespaceMappings", `Agregando ${baseNamespaceTags.length} tag(s) al namespace base "${baseNamespacePrefix}"`);
     }
+    
+    // Reemplazar tagsMapping con el nuevo construido desde el uso real
+    // Pero mantener los prefijos que ya estaban en prefixesMapping (pueden ser necesarios para xmlns)
+    for (const prefix of Object.keys(prefixesMapping)) {
+        if (!newTagsMapping[prefix]) {
+            newTagsMapping[prefix] = [];
+        }
+    }
+    
+    // Usar el nuevo tagsMapping construido desde el uso real
+    Object.assign(tagsMapping, newTagsMapping);
     
     return {
         tagsMapping,

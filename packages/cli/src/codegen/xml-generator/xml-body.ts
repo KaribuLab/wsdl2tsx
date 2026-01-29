@@ -1,6 +1,6 @@
 import { toCamelCase } from "../../util.js";
 import { extractLocalName, getFilteredKeys } from "../utils.js";
-import type { TypeObject, TypeDefinition, NamespaceTypesMapping, NamespacePrefixesMapping } from "../types.js";
+import type { TypeObject, TypeDefinition, NamespaceTypesMapping, NamespacePrefixesMapping, TagUsageCollector } from "../types.js";
 import { generateXmlPropertyCode } from "./xml-property.js";
 import { resolveReferencedType, resolveNestedType } from "./type-resolution.js";
 
@@ -15,7 +15,8 @@ export function generateXmlBodyCode(
     propsInterfaceName?: string,
     schemaObject?: any,
     allComplexTypes?: any,
-    prefixesMapping?: NamespacePrefixesMapping
+    prefixesMapping?: NamespacePrefixesMapping,
+    tagUsageCollector?: TagUsageCollector
 ): string {
     const keys = getFilteredKeys(baseTypeObject);
     // Extraer nombre local del tipo base
@@ -40,7 +41,7 @@ export function generateXmlBodyCode(
                 const typeKeys = getFilteredKeys(typeValue as TypeObject);
                 // Si tiene propiedades, procesar recursivamente el objeto type
                 if (typeKeys.length > 0) {
-                    return generateXmlBodyCode(baseNamespacePrefix, namespacesTypeMapping, baseTypeName, typeValue as TypeObject, propsInterfaceName, schemaObject, allComplexTypes, prefixesMapping);
+                    return generateXmlBodyCode(baseNamespacePrefix, namespacesTypeMapping, baseTypeName, typeValue as TypeObject, propsInterfaceName, schemaObject, allComplexTypes, prefixesMapping, tagUsageCollector);
                 }
             }
             // Si type es un string (referencia), NO expandir - dejar que generateXmlPropertyCode maneje el tag intermedio
@@ -75,7 +76,8 @@ export function generateXmlBodyCode(
                     true, // El padre (root element) siempre es qualified
                     prefixesMapping,
                     schemaObject,
-                    allComplexTypes
+                    allComplexTypes,
+                    tagUsageCollector
                 );
             }
             return '';
@@ -84,6 +86,14 @@ export function generateXmlBodyCode(
         .join('\n');
     
     // El elemento raíz siempre tiene prefijo (es un elemento global, no local)
+    // Registrar el tag raíz si hay collector
+    if (tagUsageCollector) {
+        tagUsageCollector.tagToPrefix.set(baseTypeLocalName, baseNamespacePrefix);
+        if (prefixesMapping && prefixesMapping[baseNamespacePrefix]) {
+            tagUsageCollector.prefixToNamespace.set(baseNamespacePrefix, prefixesMapping[baseNamespacePrefix]);
+        }
+    }
+    
     return `<${baseNamespacePrefix}.${baseTypeLocalName}>
     ${properties}
 </${baseNamespacePrefix}.${baseTypeLocalName}>`;

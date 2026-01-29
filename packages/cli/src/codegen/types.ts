@@ -78,3 +78,12 @@ export interface CombinedNamespaceMappings {
     prefixesMapping: NamespacePrefixesMapping
     typesMapping: NamespaceTypesMapping
 }
+
+/**
+ * Recolecta información sobre tags usados durante la generación del XML
+ * Mapea: tagLocalName -> namespacePrefix usado en el XML
+ */
+export interface TagUsageCollector {
+    tagToPrefix: Map<string, string>; // tagLocalName -> prefix usado
+    prefixToNamespace: Map<string, string>; // prefix -> namespace URI
+}

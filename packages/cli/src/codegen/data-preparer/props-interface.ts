@@ -130,58 +130,86 @@ export function preparePropsInterfaceData(typeName: string, typeObject: TypeObje
                         
                         if (nestedReferencedElement && typeof nestedReferencedElement === 'object') {
                             debugContext("preparePropsInterfaceData", `Expandiendo contenido del tipo anidado`);
+                            // Limpiar propiedades internas antes de expandir
+                            const cleanedNestedElement = { ...nestedReferencedElement };
+                            Object.keys(cleanedNestedElement).forEach(key => {
+                                if (key.startsWith('_')) {
+                                    delete (cleanedNestedElement as any)[key];
+                                }
+                            });
                             // Usar el tipo anidado directamente
-                            return preparePropsInterfaceData(typeName, nestedReferencedElement, allTypesForInterfaces, schemaObject, allComplexTypes);
+                            return preparePropsInterfaceData(typeName, cleanedNestedElement, allTypesForInterfaces, schemaObject, allComplexTypes);
                         }
                     }
                     // Si encontramos el elemento referenciado, expandir su contenido
-                    return preparePropsInterfaceData(typeName, referencedElement, allTypesForInterfaces, schemaObject, allComplexTypes);
+                    // Limpiar propiedades internas antes de expandir
+                    const cleanedReferencedElement = { ...referencedElement };
+                    Object.keys(cleanedReferencedElement).forEach(key => {
+                        if (key.startsWith('_')) {
+                            delete (cleanedReferencedElement as any)[key];
+                        }
+                    });
+                    return preparePropsInterfaceData(typeName, cleanedReferencedElement, allTypesForInterfaces, schemaObject, allComplexTypes);
                 }
             }
             
             // Si type es un objeto (tipo complejo anidado), extraer propiedades de ese objeto
             if (typeof typeValue === 'object' && typeValue !== null) {
-                const typeKeys = getFilteredKeys(typeValue as TypeObject);
+                // Limpiar propiedades internas antes de procesar
+                const cleanedTypeValue = { ...typeValue };
+                Object.keys(cleanedTypeValue).forEach(key => {
+                    if (key.startsWith('_')) {
+                        delete (cleanedTypeValue as any)[key];
+                    }
+                });
+                const typeKeys = getFilteredKeys(cleanedTypeValue as TypeObject);
                 // Si tiene propiedades, procesar recursivamente el objeto type
                 if (typeKeys.length > 0) {
-                    return preparePropsInterfaceData(typeName, typeValue as TypeObject, allTypesForInterfaces, schemaObject, allComplexTypes);
+                    return preparePropsInterfaceData(typeName, cleanedTypeValue as TypeObject, allTypesForInterfaces, schemaObject, allComplexTypes);
                 }
             }
         }
     }
     
     // Usar nombres locales para las propiedades y determinar el tipo correcto
-    const properties = keys.map(key => {
-        const localName = extractLocalName(key);
-        const element = typeObject[key]!;
-        
-        let propertyType: string;
-        
-        if (typeof element === 'string') {
-            // Tipo simple (xsd:string, etc.)
-            const xmlSchemaType = extractXmlSchemaType(element);
-            propertyType = XML_SCHEMA_TYPES[xmlSchemaType] ?? 'string';
-        } else if (typeof element === 'object' && element !== null) {
-            // Tipo complejo
-            if ('type' in element && typeof (element as any).type === 'string') {
-                // Tipo referenciado por string (ej: "tns2:CodigoPlanListTO")
-                propertyType = resolveTypeName((element as any).type, localName, allTypesForInterfaces);
-            } else if ('type' in element && typeof (element as any).type === 'object') {
-                // Tipo complejo inline con type como objeto - usar el nombre local en PascalCase como tipo de interfaz
-                propertyType = toPascalCase(localName);
+    // Filtrar propiedades internas que empiezan con _ (como _referencedElementNamespace)
+    const properties = keys
+        .filter(key => {
+            const localName = extractLocalName(key);
+            // Filtrar propiedades internas que empiezan con _
+            return !localName.startsWith('_');
+        })
+        .map(key => {
+            const localName = extractLocalName(key);
+            const element = typeObject[key]!;
+            
+            let propertyType: string;
+            
+            if (typeof element === 'string') {
+                // Tipo simple (xsd:string, etc.)
+                const xmlSchemaType = extractXmlSchemaType(element);
+                propertyType = XML_SCHEMA_TYPES[xmlSchemaType] ?? 'string';
+            } else if (typeof element === 'object' && element !== null) {
+                // Tipo complejo
+                if ('type' in element && typeof (element as any).type === 'string') {
+                    // Tipo referenciado por string (ej: "tns2:CodigoPlanListTO")
+                    propertyType = resolveTypeName((element as any).type, localName, allTypesForInterfaces);
+                } else if ('type' in element && typeof (element as any).type === 'object') {
+                    // Tipo complejo inline con type como objeto - usar el nombre local en PascalCase como tipo de interfaz
+                    propertyType = toPascalCase(localName);
+                } else {
+                    // Tipo complejo inline sin type - usar el nombre local en PascalCase como tipo de interfaz
+                    propertyType = toPascalCase(localName);
+                }
             } else {
-                // Tipo complejo inline sin type - usar el nombre local en PascalCase como tipo de interfaz
-                propertyType = toPascalCase(localName);
+                propertyType = 'any';
             }
-        } else {
-            propertyType = 'any';
-        }
-        
-        return {
-            name: localName,
-            type: propertyType,
-        };
-    });
+            
+            return {
+                name: localName,
+                type: propertyType,
+            };
+        });
     
     // Usar nombre local para el tipo
     return {

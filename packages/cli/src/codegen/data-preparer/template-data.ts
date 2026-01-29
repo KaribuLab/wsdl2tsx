@@ -65,6 +65,7 @@ export function prepareTemplateData(
     
     // Para el body, no usar prefijo de propsInterfaceName (las propiedades son directas)
     // Solo usar propsInterfaceName para headers
+    // Nota: No pasamos tagUsageCollector aquí porque ya se recolectó la información en extractAllNamespaceMappings
     const xmlBody = generateXmlBodyCode(baseNamespacePrefix, namespacesTypeMapping, requestType, requestTypeObject, undefined, schemaObject, allComplexTypes, namespacesPrefixMapping);
     
     // Usar nombre local del requestType para el template

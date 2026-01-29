@@ -2,7 +2,7 @@ import { toCamelCase } from "../../util.js";
 import { extractLocalName, getFilteredKeys } from "../utils.js";
 import { getNamespacePrefix, shouldHavePrefix } from "../namespaces.js";
 import { DEFAULT_OCCURS } from "../constants.js";
-import type { TypeObject, TypeDefinition, NamespaceTypesMapping, NamespacePrefixesMapping } from "../types.js";
+import type { TypeObject, TypeDefinition, NamespaceTypesMapping, NamespacePrefixesMapping, TagUsageCollector } from "../types.js";
 import { resolveReferencedType, resolveNestedType } from "./type-resolution.js";
 
 /**
@@ -18,7 +18,8 @@ export function generateXmlPropertyCode(
     parentIsQualified: boolean = true, // El padre (root element) siempre es qualified
     prefixesMapping?: NamespacePrefixesMapping,
     schemaObject?: any,
-    allComplexTypes?: any
+    allComplexTypes?: any,
+    tagUsageCollector?: TagUsageCollector
 ): string {
     const namespacePrefix = getNamespacePrefix(
         namespacesTypeMapping,
@@ -39,6 +40,15 @@ export function generateXmlPropertyCode(
     // Generar el tag con o sin prefijo según $qualified
     const openTag = isQualified ? `<${namespacePrefix}.${tagLocalName}>` : `<${tagLocalName}>`;
     const closeTag = isQualified ? `</${namespacePrefix}.${tagLocalName}>` : `</${tagLocalName}>`;
+    
+    // Registrar el tag usado con su prefijo si hay collector
+    if (tagUsageCollector && isQualified) {
+        tagUsageCollector.tagToPrefix.set(tagLocalName, namespacePrefix);
+        // También registrar el namespace URI si tenemos prefixesMapping
+        if (prefixesMapping && prefixesMapping[namespacePrefix]) {
+            tagUsageCollector.prefixToNamespace.set(namespacePrefix, prefixesMapping[namespacePrefix]);
+        }
+    }
     
     // Detectar si es un array basándose en maxOccurs
     const isArray = typeof elementObject === 'object' && elementObject !== null && 
@@ -129,6 +139,15 @@ export function generateXmlPropertyCode(
                 ? `</${wrapperNamespacePrefix}.${tagLocalName}>` 
                 : `</${tagLocalName}>`;
             
+            // Registrar el tag wrapper usado con su prefijo si hay collector
+            if (tagUsageCollector && wrapperIsQualified) {
+                tagUsageCollector.tagToPrefix.set(tagLocalName, wrapperNamespacePrefix);
+                // También registrar el namespace URI si tenemos prefixesMapping
+                if (prefixesMapping && prefixesMapping[wrapperNamespacePrefix]) {
+                    tagUsageCollector.prefixToNamespace.set(wrapperNamespacePrefix, prefixesMapping[wrapperNamespacePrefix]);
+                }
+            }
+            
             // Si el elemento referenciado tiene un type que es string, seguir resolviendo
             let finalReferencedElement = referencedElement;
             if ('type' in referencedElement && typeof referencedElement.type === 'string') {
@@ -181,7 +200,8 @@ export function generateXmlPropertyCode(
                                     isQualified,
                                     prefixesMapping,
                                     schemaObject,
-                                    allComplexTypes
+                                    allComplexTypes,
+                                    tagUsageCollector
                                 );
                             }
                             return '';
@@ -233,7 +253,8 @@ export function generateXmlPropertyCode(
                                 isQualified,
                                 prefixesMapping,
                                 schemaObject,
-                                allComplexTypes
+                                allComplexTypes,
+                                tagUsageCollector
                             );
                         }
                         return '';
@@ -330,7 +351,8 @@ export function generateXmlPropertyCode(
                             isQualified,
                             prefixesMapping,
                             schemaObject,
-                            allComplexTypes
+                            allComplexTypes,
+                            tagUsageCollector
                         );
                     }
                     return '';
