@@ -147,9 +147,12 @@ export const getInputNode = (node: XmlNode): XmlNode | undefined => {
     return node[inputField!];
 };
 
-export const getPartNode = (node: XmlNode): XmlNode | undefined => {
+export const getPartNode = (node: XmlNode): XmlNode | XmlNode[] | undefined => {
     const partField = Object.keys(node).find(objectField => objectField.match(/([a-zA-z0-9]*:)?part/));
-    return node[partField!];
+    if (!partField) return undefined;
+    const partValue = node[partField];
+    // Puede ser un solo part o un array de parts
+    return partValue;
 };
 
 export const getNamespacesFromNode = (node: XmlNode): Map<string, string> => {

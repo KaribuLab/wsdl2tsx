@@ -260,7 +260,7 @@ export async function generateTsxFromWsdl(
     
     // Función auxiliar para procesar una operación individual
     const processOperation = (operationNode: XmlNode): void => {
-        const operationInfo = getRequestTypeFromOperation(operationNode, definitionsNode, schemaObject);
+        const operationInfo = getRequestTypeFromOperation(operationNode, definitionsNode, schemaObject, allComplexTypes);
         
         if (!operationInfo) {
             const opName = getOperationName(operationNode);

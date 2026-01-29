@@ -58,6 +58,11 @@ export const loadXml = async (xmlPath: string): Promise<XmlNode> => {
 };
 
 export const loadXsd = async (wsdlFile: string, xsdPath: string): Promise<XmlNode> => {
+    // Si xsdPath ya es una URL completa, usarla directamente
+    if (xsdPath.match(/^http(s)?:\/\//)) {
+        return await loadXml(xsdPath);
+    }
+    
     if (wsdlFile.match(/^http(s)?:\/\//)) {
         const wsdlURLWithoutName = wsdlFile.split('/').slice(0, -1).join('/');
         return await loadXml([wsdlURLWithoutName, xsdPath].join('/'));

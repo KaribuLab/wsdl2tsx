@@ -24,7 +24,8 @@ export const getOperationName = (operationNode: XmlNode): string => {
 export const getRequestTypeFromOperation = (
     operationNode: XmlNode,
     definitionsNode: XmlNode,
-    schemaObject: any
+    schemaObject: any,
+    allComplexTypes?: any
 ): { operationName: string, requestType: string } | null => {
     const operationName = getOperationName(operationNode);
     
@@ -47,60 +48,130 @@ export const getRequestTypeFromOperation = (
         throw new Error(`No se encontró el mensaje ${inputNode.message} en las definiciones`);
     }
     
-    const partNode = getPartNode(inputMessageNode);
-    if (!partNode) {
+    const partNodeOrArray = getPartNode(inputMessageNode);
+    if (!partNodeOrArray) {
         throw new Error(`No se encontró el nodo part en el mensaje de entrada de la operación '${operationName}'`);
     }
     
-    if (!partNode.element) {
-        throw new Error(`El nodo part de la operación '${operationName}' no tiene el atributo element definido`);
+    // Manejar tanto un solo part como un array de parts
+    const partNodes: XmlNode[] = Array.isArray(partNodeOrArray) ? partNodeOrArray : [partNodeOrArray];
+    
+    // Buscar el part que tenga 'element' o 'type' definido
+    let partNode: XmlNode | undefined = undefined;
+    for (const part of partNodes) {
+        if (part.element || part.type) {
+            partNode = part;
+            break;
+        }
+    }
+    
+    if (!partNode) {
+        const partNames = partNodes.map(p => p.name || 'sin nombre').join(', ');
+        throw new Error(
+            `Ninguno de los nodos part en el mensaje de entrada de la operación '${operationName}' ` +
+            `tiene ni el atributo 'element' ni 'type' definido. Parts encontrados: ${partNames}`
+        );
     }
     
     // Obtener namespaces para resolver prefijos
     const definitionsNamespaces = getNamespacesFromNode(definitionsNode);
     
-    // Resolver el elemento: puede tener prefijo (ej: WL5G3N1:consultaCodigoPlan) o ser un nombre completo
-    let elementName = partNode.element;
-    let resolvedElementName = elementName;
-    
-    // Si tiene prefijo, intentar resolverlo
-    if (elementName.includes(':')) {
-        const [prefix, localName] = elementName.split(':');
-        const namespaceUri = definitionsNamespaces.get(prefix);
-        if (namespaceUri) {
-            // Construir nombre completo con namespace URI
-            resolvedElementName = `${namespaceUri}:${localName}`;
+    // Función auxiliar para resolver un nombre de tipo
+    const resolveTypeName = (name: string): string => {
+        if (name.includes(':')) {
+            const [prefix, localName] = name.split(':');
+            const namespaceUri = definitionsNamespaces.get(prefix);
+            if (namespaceUri) {
+                return `${namespaceUri}:${localName}`;
+            }
         }
-    }
+        return name;
+    };
     
-    // Buscar el tipo de varias formas:
-    // 1. Por nombre completo resuelto (namespace URI:nombre)
-    // 2. Por nombre con prefijo original
-    // 3. Por nombre local (sin prefijo)
-    const requestType = Object.keys(schemaObject).find(item => {
-        // Filtrar la clave $namespace
-        if (item === '$namespace') return false;
+    // Función auxiliar para buscar un tipo en un objeto
+    const findTypeInObject = (obj: any, typeName: string, resolvedTypeName: string): string | undefined => {
+        return Object.keys(obj).find(item => {
+            if (item === '$namespace') return false;
+            const itemLocalName = item.split(':').pop() || '';
+            const typeLocalName = typeName.split(':').pop() || '';
+            return item === resolvedTypeName || 
+                   item === typeName ||
+                   item.endsWith(`:${typeLocalName}`) ||
+                   resolvedTypeName.endsWith(itemLocalName) ||
+                   typeName.endsWith(itemLocalName);
+        });
+    };
+    
+    // Manejar tanto 'element' como 'type' en el nodo part
+    if (partNode.element) {
+        // Caso 1: El part tiene 'element' (Document/Literal style)
+        const elementName = partNode.element;
+        const resolvedElementName = resolveTypeName(elementName);
         
-        // Buscar coincidencias exactas o por sufijo
-        return item === resolvedElementName || 
-               item === elementName ||
-               item.endsWith(`:${elementName.split(':').pop()}`) ||
-               resolvedElementName.endsWith(item.split(':').pop() || '') ||
-               elementName.endsWith(item.split(':').pop() || '');
-    });
-    
-    if (!requestType) {
+        // Buscar el tipo en schemaObject (elementos)
+        const requestType = findTypeInObject(schemaObject, elementName, resolvedElementName);
+        
+        if (requestType) {
+            return { operationName, requestType };
+        }
+        
+        // Si no se encuentra en schemaObject, buscar en allComplexTypes
+        if (allComplexTypes) {
+            const complexTypeKey = findTypeInObject(allComplexTypes, elementName, resolvedElementName);
+            
+            if (complexTypeKey) {
+                // Crear un wrapper en schemaObject para que el resto del código funcione
+                const complexType = allComplexTypes[complexTypeKey];
+                schemaObject[complexTypeKey] = complexType;
+                return { operationName, requestType: complexTypeKey };
+            }
+        }
+        
         const availableTypes = Object.keys(schemaObject).filter(k => k !== '$namespace').join(', ');
         throw new Error(
             `No se encontró el tipo de solicitud '${partNode.element}' (resuelto: '${resolvedElementName}') ` +
             `para la operación '${operationName}'. Tipos disponibles: ${availableTypes || 'ninguno'}`
         );
+    } else if (partNode.type) {
+        // Caso 2: El part tiene 'type' (RPC/Encoded o Document/Literal con type)
+        const typeName = partNode.type;
+        const resolvedTypeName = resolveTypeName(typeName);
+        
+        // Buscar primero en allComplexTypes (donde están los complexTypes)
+        if (allComplexTypes) {
+            const complexTypeKey = findTypeInObject(allComplexTypes, typeName, resolvedTypeName);
+            
+            if (complexTypeKey) {
+                // Crear un wrapper en schemaObject para que el resto del código funcione
+                const complexType = allComplexTypes[complexTypeKey];
+                schemaObject[complexTypeKey] = complexType;
+                return { operationName, requestType: complexTypeKey };
+            }
+        }
+        
+        // Si no se encuentra en allComplexTypes, buscar en schemaObject
+        const requestType = findTypeInObject(schemaObject, typeName, resolvedTypeName);
+        
+        if (requestType) {
+            return { operationName, requestType };
+        }
+        
+        const availableTypes = Object.keys(schemaObject).filter(k => k !== '$namespace').join(', ');
+        const availableComplexTypes = allComplexTypes ? Object.keys(allComplexTypes).filter(k => k !== '$namespace').join(', ') : 'ninguno';
+        throw new Error(
+            `No se encontró el tipo de solicitud '${partNode.type}' (resuelto: '${resolvedTypeName}') ` +
+            `para la operación '${operationName}'. Tipos en schemaObject: ${availableTypes || 'ninguno'}. ` +
+            `Tipos en complexTypes: ${availableComplexTypes}`
+        );
+    } else {
+        // Caso 3: No tiene ni 'element' ni 'type'
+        throw new Error(
+            `El nodo part de la operación '${operationName}' no tiene ni el atributo 'element' ni 'type' definido`
+        );
     }
-    
-    return { operationName, requestType };
 };
 
-export const getRequestTypeFromDefinitions = (definitionsNode: XmlNode, schemaObject: any): string => {
+export const getRequestTypeFromDefinitions = (definitionsNode: XmlNode, schemaObject: any, allComplexTypes?: any): string => {
     const portTypeNode = getPortTypeNode(definitionsNode);
     if (!portTypeNode) {
         throw new Error('No se encontró el nodo portType en las definiciones del WSDL');
@@ -130,55 +201,118 @@ export const getRequestTypeFromDefinitions = (definitionsNode: XmlNode, schemaOb
         throw new Error(`No se encontró el mensaje ${inputNode.message} en las definiciones`);
     }
     
-    const partNode = getPartNode(inputMessageNode);
-    if (!partNode) {
+    const partNodeOrArray = getPartNode(inputMessageNode);
+    if (!partNodeOrArray) {
         throw new Error('No se encontró el nodo part en el mensaje de entrada');
     }
     
-    if (!partNode.element) {
-        throw new Error('El nodo part no tiene el atributo element definido');
+    // Manejar tanto un solo part como un array de parts
+    const partNodes: XmlNode[] = Array.isArray(partNodeOrArray) ? partNodeOrArray : [partNodeOrArray];
+    
+    // Buscar el part que tenga 'element' o 'type' definido
+    let partNode: XmlNode | undefined = undefined;
+    for (const part of partNodes) {
+        if (part.element || part.type) {
+            partNode = part;
+            break;
+        }
+    }
+    
+    if (!partNode) {
+        const partNames = partNodes.map(p => p.name || 'sin nombre').join(', ');
+        throw new Error(
+            `Ninguno de los nodos part en el mensaje de entrada tiene ni el atributo 'element' ni 'type' definido. ` +
+            `Parts encontrados: ${partNames}`
+        );
     }
     
     // Obtener namespaces para resolver prefijos
     const definitionsNamespaces = getNamespacesFromNode(definitionsNode);
     
-    // Resolver el elemento: puede tener prefijo (ej: WL5G3N1:consultaCodigoPlan) o ser un nombre completo
-    let elementName = partNode.element;
-    let resolvedElementName = elementName;
-    
-    // Si tiene prefijo, intentar resolverlo
-    if (elementName.includes(':')) {
-        const [prefix, localName] = elementName.split(':');
-        const namespaceUri = definitionsNamespaces.get(prefix);
-        if (namespaceUri) {
-            // Construir nombre completo con namespace URI
-            resolvedElementName = `${namespaceUri}:${localName}`;
+    // Función auxiliar para resolver un nombre de tipo
+    const resolveTypeName = (name: string): string => {
+        if (name.includes(':')) {
+            const [prefix, localName] = name.split(':');
+            const namespaceUri = definitionsNamespaces.get(prefix);
+            if (namespaceUri) {
+                return `${namespaceUri}:${localName}`;
+            }
         }
-    }
+        return name;
+    };
     
-    // Buscar el tipo de varias formas:
-    // 1. Por nombre completo resuelto (namespace URI:nombre)
-    // 2. Por nombre con prefijo original
-    // 3. Por nombre local (sin prefijo)
-    const requestType = Object.keys(schemaObject).find(item => {
-        // Filtrar la clave $namespace
-        if (item === '$namespace') return false;
+    // Función auxiliar para buscar un tipo en un objeto
+    const findTypeInObject = (obj: any, typeName: string, resolvedTypeName: string): string | undefined => {
+        return Object.keys(obj).find(item => {
+            if (item === '$namespace') return false;
+            const itemLocalName = item.split(':').pop() || '';
+            const typeLocalName = typeName.split(':').pop() || '';
+            return item === resolvedTypeName || 
+                   item === typeName ||
+                   item.endsWith(`:${typeLocalName}`) ||
+                   resolvedTypeName.endsWith(itemLocalName) ||
+                   typeName.endsWith(itemLocalName);
+        });
+    };
+    
+    // Manejar tanto 'element' como 'type' en el nodo part
+    if (partNode.element) {
+        // Caso 1: El part tiene 'element' (Document/Literal style)
+        const elementName = partNode.element;
+        const resolvedElementName = resolveTypeName(elementName);
         
-        // Buscar coincidencias exactas o por sufijo
-        return item === resolvedElementName || 
-               item === elementName ||
-               item.endsWith(`:${elementName.split(':').pop()}`) ||
-               resolvedElementName.endsWith(item.split(':').pop() || '') ||
-               elementName.endsWith(item.split(':').pop() || '');
-    });
-    
-    if (!requestType) {
+        const requestType = findTypeInObject(schemaObject, elementName, resolvedElementName);
+        
+        if (requestType) {
+            return requestType;
+        }
+        
+        // Buscar en allComplexTypes si está disponible
+        if (allComplexTypes) {
+            const complexTypeKey = findTypeInObject(allComplexTypes, elementName, resolvedElementName);
+            
+            if (complexTypeKey) {
+                const complexType = allComplexTypes[complexTypeKey];
+                schemaObject[complexTypeKey] = complexType;
+                return complexTypeKey;
+            }
+        }
+        
         const availableTypes = Object.keys(schemaObject).filter(k => k !== '$namespace').join(', ');
         throw new Error(
             `No se encontró el tipo de solicitud '${partNode.element}' (resuelto: '${resolvedElementName}') en el schema. ` +
             `Tipos disponibles: ${availableTypes || 'ninguno'}`
         );
+    } else if (partNode.type) {
+        // Caso 2: El part tiene 'type' (RPC/Encoded o Document/Literal con type)
+        const typeName = partNode.type;
+        const resolvedTypeName = resolveTypeName(typeName);
+        
+        // Buscar primero en allComplexTypes
+        if (allComplexTypes) {
+            const complexTypeKey = findTypeInObject(allComplexTypes, typeName, resolvedTypeName);
+            
+            if (complexTypeKey) {
+                const complexType = allComplexTypes[complexTypeKey];
+                schemaObject[complexTypeKey] = complexType;
+                return complexTypeKey;
+            }
+        }
+        
+        // Buscar en schemaObject
+        const requestType = findTypeInObject(schemaObject, typeName, resolvedTypeName);
+        
+        if (requestType) {
+            return requestType;
+        }
+        
+        const availableTypes = Object.keys(schemaObject).filter(k => k !== '$namespace').join(', ');
+        const availableComplexTypes = allComplexTypes ? Object.keys(allComplexTypes).filter(k => k !== '$namespace').join(', ') : 'ninguno';
+        throw new Error(
+            `No se encontró el tipo de solicitud '${partNode.type}' (resuelto: '${resolvedTypeName}') en el schema. ` +
+            `Tipos en schemaObject: ${availableTypes || 'ninguno'}. Tipos en complexTypes: ${availableComplexTypes}`
+        );
+    } else {
+        throw new Error('El nodo part no tiene ni el atributo \'element\' ni \'type\' definido');
     }
-    
-    return requestType;
 };
