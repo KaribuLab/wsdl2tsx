@@ -3,6 +3,7 @@ import { extractLocalName, getFilteredKeys } from "../utils.js";
 import { getNamespacePrefix, shouldHavePrefix } from "../namespaces.js";
 import { DEFAULT_OCCURS } from "../constants.js";
 import type { TypeObject, TypeDefinition, NamespaceTypesMapping, NamespacePrefixesMapping } from "../types.js";
+import { resolveReferencedType, resolveNestedType } from "./type-resolution.js";
 
 /**
  * Genera el código del template de una propiedad del cuerpo XML
@@ -15,7 +16,9 @@ export function generateXmlPropertyCode(
     parentKey: string | null = null,
     propertyPath: string = '',
     parentIsQualified: boolean = true, // El padre (root element) siempre es qualified
-    prefixesMapping?: NamespacePrefixesMapping
+    prefixesMapping?: NamespacePrefixesMapping,
+    schemaObject?: any,
+    allComplexTypes?: any
 ): string {
     const namespacePrefix = getNamespacePrefix(
         namespacesTypeMapping,
@@ -52,6 +55,133 @@ export function generateXmlPropertyCode(
             : `${propertyPath}.${tagCamelCase}`)
         : tagCamelCase;
     
+    // Si el elemento tiene un type que es string (referencia), resolverlo y generar el tag intermedio
+    if (typeof elementObject === 'object' && elementObject !== null && typeof elementObject.type === 'string' && (schemaObject || allComplexTypes)) {
+        const referencedType = elementObject.type;
+        const referencedElement = resolveReferencedType(referencedType, schemaObject, allComplexTypes);
+        
+        if (referencedElement && typeof referencedElement === 'object') {
+            // Si el elemento referenciado tiene un type que es string, seguir resolviendo
+            let finalReferencedElement = referencedElement;
+            if ('type' in referencedElement && typeof referencedElement.type === 'string') {
+                const nestedReferencedElement = resolveNestedType(referencedElement.type, schemaObject, allComplexTypes);
+                if (nestedReferencedElement && typeof nestedReferencedElement === 'object') {
+                    finalReferencedElement = nestedReferencedElement;
+                }
+            }
+            
+            // Si el elemento referenciado tiene un type que es objeto, generar el XML con ese tipo
+            // IMPORTANTE: Cuando se expanden propiedades de un tipo referenciado, usar propertyPath del nivel superior
+            // (sin incluir el nombre del elemento referenciado) porque preparePropsInterfaceData expande las propiedades
+            if ('type' in finalReferencedElement && typeof finalReferencedElement.type === 'object' && finalReferencedElement.type !== null) {
+                const keys = getFilteredKeys(finalReferencedElement.type as TypeObject);
+                if (keys.length > 0) {
+                    // Cuando preparePropsInterfaceData expande propiedades de un tipo referenciado,
+                    // las propiedades aparecen directamente en el nivel superior de la interfaz de props
+                    // Por lo tanto, debemos usar el propertyPath del padre (antes de agregar el nombre del elemento actual)
+                    // Si propertyPath es el nombre del elemento actual, usar string vacío
+                    let parentPropertyPath = '';
+                    if (propertyPath === tagCamelCase) {
+                        // El propertyPath es exactamente el nombre del elemento actual, usar string vacío
+                        parentPropertyPath = '';
+                    } else if (propertyPath.endsWith(`.${tagCamelCase}`)) {
+                        // El propertyPath termina con el nombre del elemento actual, removerlo
+                        parentPropertyPath = propertyPath.slice(0, -(tagCamelCase.length + 1));
+                    } else {
+                        // El propertyPath no incluye el nombre del elemento actual, mantenerlo
+                        parentPropertyPath = propertyPath;
+                    }
+                    
+                    const nestedProperties = keys
+                        .map(elementKey => {
+                            const nestedElement = (finalReferencedElement.type as TypeObject)[elementKey]!;
+                            if (typeof nestedElement === 'object' && nestedElement !== null) {
+                                const nestedKeyLocalName = extractLocalName(elementKey);
+                                const nestedKeyCamelCase = toCamelCase(nestedKeyLocalName);
+                                // Usar el propertyPath del nivel superior directamente (propiedades expandidas)
+                                const nestedPropertyPath = parentPropertyPath 
+                                    ? `${parentPropertyPath}.${nestedKeyCamelCase}`
+                                    : nestedKeyCamelCase;
+                                
+                                return generateXmlPropertyCode(
+                                    namespacesTypeMapping,
+                                    baseNamespacePrefix,
+                                    elementKey,
+                                    nestedElement as TypeDefinition,
+                                    key,
+                                    nestedPropertyPath,
+                                    isQualified,
+                                    prefixesMapping,
+                                    schemaObject,
+                                    allComplexTypes
+                                );
+                            }
+                            return '';
+                        })
+                        .filter(Boolean)
+                        .join('\n');
+                    
+                    return `${openTag}
+    ${nestedProperties}
+    ${closeTag}`;
+                }
+            }
+            
+            // Si el elemento referenciado es directamente un objeto con propiedades, generar el XML
+            const referencedKeys = getFilteredKeys(finalReferencedElement);
+            if (referencedKeys.length > 0) {
+                // Cuando preparePropsInterfaceData expande propiedades de un tipo referenciado,
+                // las propiedades aparecen directamente en el nivel superior de la interfaz de props
+                let parentPropertyPath = '';
+                if (propertyPath === tagCamelCase) {
+                    // El propertyPath es exactamente el nombre del elemento actual, usar string vacío
+                    parentPropertyPath = '';
+                } else if (propertyPath.endsWith(`.${tagCamelCase}`)) {
+                    // El propertyPath termina con el nombre del elemento actual, removerlo
+                    parentPropertyPath = propertyPath.slice(0, -(tagCamelCase.length + 1));
+                } else {
+                    // El propertyPath no incluye el nombre del elemento actual, mantenerlo
+                    parentPropertyPath = propertyPath;
+                }
+                
+                const nestedProperties = referencedKeys
+                    .map(elementKey => {
+                        const nestedElement = finalReferencedElement[elementKey]!;
+                        if (typeof nestedElement === 'object' && nestedElement !== null) {
+                            const nestedKeyLocalName = extractLocalName(elementKey);
+                            const nestedKeyCamelCase = toCamelCase(nestedKeyLocalName);
+                            // Usar el propertyPath del nivel superior directamente (propiedades expandidas)
+                            const nestedPropertyPath = parentPropertyPath 
+                                ? `${parentPropertyPath}.${nestedKeyCamelCase}`
+                                : nestedKeyCamelCase;
+                            
+                            return generateXmlPropertyCode(
+                                namespacesTypeMapping,
+                                baseNamespacePrefix,
+                                elementKey,
+                                nestedElement as TypeDefinition,
+                                key,
+                                nestedPropertyPath,
+                                isQualified,
+                                prefixesMapping,
+                                schemaObject,
+                                allComplexTypes
+                            );
+                        }
+                        return '';
+                    })
+                    .filter(Boolean)
+                    .join('\n');
+                
+                return `${openTag}
+    ${nestedProperties}
+    ${closeTag}`;
+            }
+        }
+        // Si no se pudo resolver o no tiene propiedades, usar la propiedad directamente
+        // Esto puede pasar si la referencia no se encuentra o es un tipo simple
+    }
+    
     if (typeof elementObject === 'object' && elementObject !== null && typeof elementObject.type === 'object') {
         const keys = getFilteredKeys(elementObject.type as TypeObject);
         
@@ -78,7 +208,10 @@ export function generateXmlPropertyCode(
                                 nestedElement as TypeDefinition,
                                 key,
                                 'item', // Usar 'item' directamente en lugar de la ruta completa con índice
-                                isQualified
+                                isQualified,
+                                prefixesMapping,
+                                schemaObject,
+                                allComplexTypes
                             );
                         } else {
                             // Tipo simple dentro del array - usar 'item' directamente
@@ -127,7 +260,9 @@ export function generateXmlPropertyCode(
                             key,
                             currentPropertyPath, // Mantener el propertyPath completo (incluye propsInterfaceName si existe)
                             isQualified,
-                            prefixesMapping
+                            prefixesMapping,
+                            schemaObject,
+                            allComplexTypes
                         );
                     }
                     return '';

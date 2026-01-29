@@ -24,7 +24,10 @@ export function generateXmlBodyCode(
     // El elemento raíz siempre debe tener prefijo (es un elemento global)
     // Los elementos hijos dependen de $qualified
     
-    // Si solo hay una clave y es un tipo complejo con type como objeto, procesar el type directamente
+    // IMPORTANTE: No expandir directamente cuando hay una sola clave con referencia
+    // Debe generarse el tag intermedio (por ejemplo, reqConsultarPerfilCliente)
+    // La expansión directa solo aplica cuando el type es un objeto inline, no una referencia
+    // Si hay una sola clave y es un tipo complejo con type como objeto INLINE, procesar el type directamente
     if (keys.length === 1) {
         const singleKey = keys[0]!;
         const element = baseTypeObject[singleKey]!;
@@ -32,28 +35,7 @@ export function generateXmlBodyCode(
         if (typeof element === 'object' && element !== null && 'type' in element) {
             const typeValue = (element as any).type;
             
-            // Si type es un string (referencia a elemento o tipo), intentar resolverla desde schemaObject y allComplexTypes
-            if (typeof typeValue === 'string' && (schemaObject || allComplexTypes)) {
-                const referencedElement = resolveReferencedType(typeValue, schemaObject, allComplexTypes);
-                
-                if (referencedElement && typeof referencedElement === 'object') {
-                    // Si el elemento referenciado tiene un type que es string, seguir resolviendo
-                    if ('type' in referencedElement && typeof referencedElement.type === 'string') {
-                        // Continuar resolviendo recursivamente - buscar primero en schemaObject, luego en allComplexTypes
-                        const nestedTypeValue = referencedElement.type;
-                        const nestedReferencedElement = resolveNestedType(nestedTypeValue, schemaObject, allComplexTypes);
-                        
-                        if (nestedReferencedElement && typeof nestedReferencedElement === 'object') {
-                            // Usar el tipo anidado directamente
-                            return generateXmlBodyCode(baseNamespacePrefix, namespacesTypeMapping, baseTypeName, nestedReferencedElement, propsInterfaceName, schemaObject, allComplexTypes, prefixesMapping);
-                        }
-                    }
-                    // Si encontramos el elemento referenciado, expandir su contenido
-                    return generateXmlBodyCode(baseNamespacePrefix, namespacesTypeMapping, baseTypeName, referencedElement, propsInterfaceName, schemaObject, allComplexTypes, prefixesMapping);
-                }
-            }
-            
-            // Si type es un objeto (tipo complejo anidado), procesar ese objeto directamente
+            // Solo expandir si type es un objeto (tipo complejo anidado inline), NO si es una referencia string
             if (typeof typeValue === 'object' && typeValue !== null) {
                 const typeKeys = getFilteredKeys(typeValue as TypeObject);
                 // Si tiene propiedades, procesar recursivamente el objeto type
@@ -61,6 +43,7 @@ export function generateXmlBodyCode(
                     return generateXmlBodyCode(baseNamespacePrefix, namespacesTypeMapping, baseTypeName, typeValue as TypeObject, propsInterfaceName, schemaObject, allComplexTypes, prefixesMapping);
                 }
             }
+            // Si type es un string (referencia), NO expandir - dejar que generateXmlPropertyCode maneje el tag intermedio
         }
     }
     
@@ -90,7 +73,9 @@ export function generateXmlBodyCode(
                     null,
                     propertyPath,
                     true, // El padre (root element) siempre es qualified
-                    prefixesMapping
+                    prefixesMapping,
+                    schemaObject,
+                    allComplexTypes
                 );
             }
             return '';
