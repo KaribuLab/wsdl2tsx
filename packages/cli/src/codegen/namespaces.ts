@@ -1,5 +1,6 @@
 import { extractNamespacePrefix, extractLocalName, getFilteredKeys } from "./utils.js";
 import { NAMESPACE_KEY } from "./constants.js";
+import { debugContext } from "../logger.js";
 import type { TypeObject, CombinedNamespaceMappings, NamespaceTagsMapping, NamespacePrefixesMapping, NamespaceTypesMapping, NamespaceInfo } from "./types.js";
 import { extractNestedTags, flattenKeysWithNamespace, extractAllTagsForXmlBody } from "./namespace-helpers.js";
 
@@ -31,7 +32,10 @@ export function extractAllNamespaceMappings(
     // Verificar si el tipo base es qualified
     const baseIsQualified = baseTypeObject.$qualified === true;
     
-    const baseNamespacePrefix = extractNamespacePrefix(baseNamespace);
+    // Crear un set para rastrear prefijos existentes y evitar colisiones
+    const existingPrefixesSet = new Set<string>();
+    const baseNamespacePrefix = extractNamespacePrefix(baseNamespace, existingPrefixesSet);
+    existingPrefixesSet.add(baseNamespacePrefix);
     
     // Extraer nombre local del tipo base
     const baseTypeLocalName = extractLocalName(baseTypeName);
@@ -78,7 +82,13 @@ export function extractAllNamespaceMappings(
             tagNames.push(...nestedTags);
         }
         
-        const namespacePrefix = extractNamespacePrefix(namespace);
+        // Verificar si hay colisión antes de generar el prefijo
+        let namespacePrefix = extractNamespacePrefix(namespace, existingPrefixesSet);
+        // Si hay colisión (el prefijo ya existe con un URI diferente), generar uno nuevo
+        if (prefixesMapping[namespacePrefix] && prefixesMapping[namespacePrefix] !== namespace) {
+            namespacePrefix = extractNamespacePrefix(namespace, existingPrefixesSet);
+        }
+        existingPrefixesSet.add(namespacePrefix);
         
         // Solo agregar al tagsMapping y prefixesMapping si hay tags qualified
         if (tagNames.length > 0) {
@@ -108,7 +118,7 @@ export function extractAllNamespaceMappings(
     // IMPORTANTE: También extraer todos los tags que se usarán en el XML body
     // Esto incluye tags de tipos referenciados que pueden no ser qualified pero se usan con prefijo
     // Necesario para registrar tags como rutCliente, aniCliente en el namespace
-    const allXmlBodyTags = extractAllTagsForXmlBody(
+    const xmlBodyResult = extractAllTagsForXmlBody(
         baseTypeObject,
         typesMapping,
         baseNamespacePrefix,
@@ -118,8 +128,72 @@ export function extractAllNamespaceMappings(
         allComplexTypes
     );
     
-    // Agregar todos los tags del XML body al namespace correspondiente
-    if (allXmlBodyTags.length > 0) {
+    // Agregar namespaces adicionales encontrados en tipos referenciados
+    // Esto es necesario para incluir namespaces como "http://osbcorp.vtr.cl/CLI/EMP/consultarPerfilClienteReq"
+    // Si hay colisión de prefijos, generar un prefijo único usando extractNamespacePrefix con retry
+    for (const [prefix, uri] of xmlBodyResult.namespaces) {
+        // Verificar si ya existe un prefijo para este URI
+        let finalPrefix: string | undefined;
+        for (const [p, u] of Object.entries(prefixesMapping)) {
+            if (u === uri) {
+                finalPrefix = p;
+                break;
+            }
+        }
+        
+        // Si no existe o hay colisión, generar uno nuevo
+        if (!finalPrefix || (prefixesMapping[prefix] && prefixesMapping[prefix] !== uri)) {
+            finalPrefix = extractNamespacePrefix(uri, existingPrefixesSet);
+            existingPrefixesSet.add(finalPrefix);
+            if (prefixesMapping[prefix] && prefixesMapping[prefix] !== uri) {
+                debugContext("extractAllNamespaceMappings", `Colisión de prefijo detectada para "${prefix}", usando prefijo único: "${finalPrefix}"`);
+            }
+        }
+        
+        if (!prefixesMapping[finalPrefix]) {
+            prefixesMapping[finalPrefix] = uri;
+            debugContext("extractAllNamespaceMappings", `Agregando namespace adicional al prefixesMapping: "${finalPrefix}" -> "${uri}"`);
+        }
+        // También asegurar que el namespace tenga tags registrados si no los tiene
+        if (!tagsMapping[finalPrefix]) {
+            tagsMapping[finalPrefix] = [];
+        }
+    }
+    
+    // Agregar tags al namespace correspondiente según su namespace real
+    for (const [nsUri, tags] of xmlBodyResult.tagsByNamespace) {
+        // Buscar si ya existe un prefijo para este URI
+        let finalPrefix: string | undefined;
+        for (const [p, u] of Object.entries(prefixesMapping)) {
+            if (u === nsUri) {
+                finalPrefix = p;
+                break;
+            }
+        }
+        
+        // Si no existe, generar uno nuevo
+        if (!finalPrefix) {
+            finalPrefix = extractNamespacePrefix(nsUri, existingPrefixesSet);
+            existingPrefixesSet.add(finalPrefix);
+        }
+        
+        if (!tagsMapping[finalPrefix]) {
+            tagsMapping[finalPrefix] = [];
+        }
+        
+        // Agregar tags que no estén ya en el array
+        const existingTags = new Set(tagsMapping[finalPrefix] || []);
+        for (const tag of tags) {
+            if (!existingTags.has(tag)) {
+                tagsMapping[finalPrefix]!.push(tag);
+                existingTags.add(tag);
+            }
+        }
+        debugContext("extractAllNamespaceMappings", `Agregando ${tags.length} tag(s) al namespace "${finalPrefix}" (${nsUri})`);
+    }
+    
+    // También agregar tags al namespace base si no se agregaron en el paso anterior
+    if (xmlBodyResult.tags.length > 0) {
         if (tagsMapping[baseNamespacePrefix] === undefined) {
             tagsMapping[baseNamespacePrefix] = [];
             prefixesMapping[baseNamespacePrefix] = baseNamespace;
@@ -127,7 +201,7 @@ export function extractAllNamespaceMappings(
         
         // Agregar tags que no estén ya en el array
         const existingTags = new Set(tagsMapping[baseNamespacePrefix] || []);
-        for (const tag of allXmlBodyTags) {
+        for (const tag of xmlBodyResult.tags) {
             if (!existingTags.has(tag)) {
                 tagsMapping[baseNamespacePrefix]!.push(tag);
                 existingTags.add(tag);
@@ -145,8 +219,16 @@ export function extractAllNamespaceMappings(
 /**
  * Obtiene el prefijo de namespace para un elemento
  * Usa el namespace del propio elemento si tiene uno definido
+ * Si hay colisiones de prefijos, busca el prefijo único en prefixesMapping
  */
-export function getNamespacePrefix(namespacesTypeMapping: NamespaceTypesMapping, baseNamespacePrefix: string, key: string, parentKey: string | null, elementObject?: any): string {
+export function getNamespacePrefix(
+    namespacesTypeMapping: NamespaceTypesMapping, 
+    baseNamespacePrefix: string, 
+    key: string, 
+    parentKey: string | null, 
+    elementObject?: any,
+    prefixesMapping?: NamespacePrefixesMapping
+): string {
     // Si el elemento tiene su propio $namespace, usarlo para determinar el prefijo
     // IMPORTANTE: Usar solo el $namespace del elemento, no del tipo interno
     // El tipo interno puede tener un namespace diferente (del schema donde está definido el tipo)
@@ -154,7 +236,44 @@ export function getNamespacePrefix(namespacesTypeMapping: NamespaceTypesMapping,
     if (elementObject && typeof elementObject === 'object') {
         const elemNs = (elementObject as any).$namespace;
         if (typeof elemNs === 'string') {
-            return extractNamespacePrefix(elemNs);
+            debugContext("getNamespacePrefix", `Elemento "${key}" tiene namespace: "${elemNs}"`);
+            // Si tenemos prefixesMapping, buscar el prefijo único que corresponde a este URI
+            // Esto es necesario cuando hay colisiones de prefijos (mismo prefijo para diferentes URIs)
+            if (prefixesMapping) {
+                // Buscar el prefijo que corresponde a este URI
+                for (const [prefix, uri] of Object.entries(prefixesMapping)) {
+                    if (uri === elemNs) {
+                        debugContext("getNamespacePrefix", `Encontrado prefijo "${prefix}" para namespace "${elemNs}"`);
+                        return prefix;
+                    }
+                }
+                debugContext("getNamespacePrefix", `No se encontró prefijo en prefixesMapping para "${elemNs}", usando extractNamespacePrefix`);
+            }
+            // Si no se encuentra en prefixesMapping, usar extractNamespacePrefix como fallback
+            // (sin set de prefijos existentes para evitar recursión infinita)
+            const extractedPrefix = extractNamespacePrefix(elemNs);
+            debugContext("getNamespacePrefix", `Usando prefijo extraído: "${extractedPrefix}" para namespace "${elemNs}"`);
+            return extractedPrefix;
+        } else {
+            // Si el elemento no tiene $namespace, verificar si el tipo interno tiene uno
+            if ('type' in elementObject && typeof elementObject.type === 'object' && elementObject.type !== null) {
+                const typeNs = (elementObject.type as any).$namespace;
+                if (typeof typeNs === 'string') {
+                    debugContext("getNamespacePrefix", `Elemento "${key}" no tiene $namespace, pero su tipo tiene: "${typeNs}"`);
+                    if (prefixesMapping) {
+                        for (const [prefix, uri] of Object.entries(prefixesMapping)) {
+                            if (uri === typeNs) {
+                                debugContext("getNamespacePrefix", `Encontrado prefijo "${prefix}" para namespace del tipo "${typeNs}"`);
+                                return prefix;
+                            }
+                        }
+                    }
+                    // (sin set de prefijos existentes para evitar recursión infinita)
+                    const extractedPrefix = extractNamespacePrefix(typeNs);
+                    debugContext("getNamespacePrefix", `Usando prefijo extraído del tipo: "${extractedPrefix}" para namespace "${typeNs}"`);
+                    return extractedPrefix;
+                }
+            }
         }
     }
     

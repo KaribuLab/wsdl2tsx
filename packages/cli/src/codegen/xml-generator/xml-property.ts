@@ -2,7 +2,7 @@ import { toCamelCase } from "../../util.js";
 import { extractLocalName, getFilteredKeys } from "../utils.js";
 import { getNamespacePrefix, shouldHavePrefix } from "../namespaces.js";
 import { DEFAULT_OCCURS } from "../constants.js";
-import type { TypeObject, TypeDefinition, NamespaceTypesMapping } from "../types.js";
+import type { TypeObject, TypeDefinition, NamespaceTypesMapping, NamespacePrefixesMapping } from "../types.js";
 
 /**
  * Genera el código del template de una propiedad del cuerpo XML
@@ -14,14 +14,16 @@ export function generateXmlPropertyCode(
     elementObject: TypeDefinition,
     parentKey: string | null = null,
     propertyPath: string = '',
-    parentIsQualified: boolean = true // El padre (root element) siempre es qualified
+    parentIsQualified: boolean = true, // El padre (root element) siempre es qualified
+    prefixesMapping?: NamespacePrefixesMapping
 ): string {
     const namespacePrefix = getNamespacePrefix(
         namespacesTypeMapping,
         baseNamespacePrefix,
         key,
         parentKey,
-        elementObject
+        elementObject,
+        prefixesMapping
     );
     
     // Extraer nombre local del tag
@@ -90,7 +92,8 @@ export function generateXmlPropertyCode(
                                     baseNamespacePrefix,
                                     elementKey,
                                     key,
-                                    nestedElement as TypeDefinition
+                                    nestedElement as TypeDefinition,
+                                    prefixesMapping
                                 );
                                 return `<${nestedNamespacePrefix}.${nestedTagLocalName}>{item.${nestedTagCamelCase}}</${nestedNamespacePrefix}.${nestedTagLocalName}>`;
                             } else {
@@ -123,7 +126,8 @@ export function generateXmlPropertyCode(
                             nestedElement as TypeDefinition,
                             key,
                             currentPropertyPath, // Mantener el propertyPath completo (incluye propsInterfaceName si existe)
-                            isQualified
+                            isQualified,
+                            prefixesMapping
                         );
                     }
                     return '';

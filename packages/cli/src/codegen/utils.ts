@@ -124,41 +124,64 @@ export function extractLocalName(fullName: string): string {
 }
 
 /**
+ * Genera un hash simple de un string
+ */
+function generateHash(str: string, seed: number = 0): number {
+    let hash = seed;
+    for (let i = 0; i < str.length; i++) {
+        hash = ((hash << 5) - hash) + str.charCodeAt(i);
+        hash = hash & hash;
+    }
+    return Math.abs(hash);
+}
+
+/**
  * Extrae el prefijo de namespace de una URI
+ * Formato: ns_<6caracteresURI>_<hash3>
  * Optimizado: usa memoización para evitar recalcular el mismo namespace
  * Genera prefijos válidos de JavaScript (solo letras, números, guiones bajos)
  */
-export function extractNamespacePrefix(namespace: string): string {
-    if (namespacePrefixCache.has(namespace)) {
-        return namespacePrefixCache.get(namespace)!;
+export function extractNamespacePrefix(namespace: string, existingPrefixes?: Set<string>, retryCount: number = 0): string {
+    const cacheKey = `${namespace}_${retryCount}`;
+    if (namespacePrefixCache.has(cacheKey)) {
+        return namespacePrefixCache.get(cacheKey)!;
     }
     
+    // Generar hash de 3 caracteres
+    const hash = generateHash(namespace, retryCount);
+    const hashStr = hash.toString(36).slice(0, 3);
+    
+    // Extraer 6 caracteres alfanuméricos de la URI (preferir última parte, luego toda la URI)
     const hasSlash = namespace.indexOf('/') !== -1;
-    let namespaceLastPart: string;
+    let sourceForChars: string;
     
     if (hasSlash) {
         const parts = cachedSplit(namespace, '/');
-        namespaceLastPart = parts[parts.length - 1]!;
+        sourceForChars = parts[parts.length - 1] || namespace;
     } else {
-        namespaceLastPart = namespace;
+        sourceForChars = namespace;
     }
     
-    // Remover puntos y otros caracteres inválidos, tomar primeros caracteres válidos
-    const cleanPart = namespaceLastPart.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-    // Usar al menos 2 caracteres, máximo 10 para evitar colisiones
-    let prefix = cleanPart.slice(0, Math.max(2, Math.min(10, cleanPart.length)));
+    // Limpiar y tomar 6 caracteres alfanuméricos
+    const cleanPart = sourceForChars.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const uriChars = cleanPart.slice(0, 6);
     
-    // Si no hay suficientes caracteres, usar un prefijo genérico basado en hash
-    if (prefix.length < 2) {
-        // Generar un hash simple del namespace
-        let hash = 0;
-        for (let i = 0; i < namespace.length; i++) {
-            hash = ((hash << 5) - hash) + namespace.charCodeAt(i);
-            hash = hash & hash;
-        }
-        prefix = 'ns' + Math.abs(hash).toString(36).slice(0, 3);
+    // Si no hay suficientes caracteres de la URI, usar más del hash
+    let finalUriChars = uriChars;
+    if (finalUriChars.length < 6) {
+        // Completar con más caracteres del hash si es necesario
+        const additionalHash = hash.toString(36).slice(3, 3 + (6 - finalUriChars.length));
+        finalUriChars = uriChars + additionalHash;
     }
     
-    namespacePrefixCache.set(namespace, prefix);
+    // Construir prefijo: ns_<6caracteres>_<hash3>
+    let prefix = `ns_${finalUriChars.slice(0, 6)}_${hashStr}`;
+    
+    // Si hay colisión y se puede reintentar, generar nuevo hash
+    if (existingPrefixes && existingPrefixes.has(prefix) && retryCount < 10) {
+        return extractNamespacePrefix(namespace, existingPrefixes, retryCount + 1);
+    }
+    
+    namespacePrefixCache.set(cacheKey, prefix);
     return prefix;
 }

@@ -30,7 +30,17 @@ export function extractNestedTags(typeObject: TypeObject): string[] {
 }
 
 /**
+ * Resultado de la extracción de tags y namespaces del XML body
+ */
+export interface XmlBodyExtractionResult {
+    tags: string[];
+    namespaces: Map<string, string>; // prefix -> namespace URI
+    tagsByNamespace: Map<string, string[]>; // namespace URI -> tags[]
+}
+
+/**
  * Extrae todos los tags que se usarán en el XML body (incluyendo no qualified)
+ * También extrae los namespaces de tipos referenciados que se necesitan en el XML
  * Esto es necesario para registrar todos los tags en el namespace, incluso si no son qualified
  */
 export function extractAllTagsForXmlBody(
@@ -41,8 +51,10 @@ export function extractAllTagsForXmlBody(
     visited: Set<string> = new Set(),
     schemaObject?: any,
     allComplexTypes?: any
-): string[] {
+): XmlBodyExtractionResult {
     const result: string[] = [];
+    const foundNamespaces = new Map<string, string>();
+    const tagsByNamespace = new Map<string, string[]>(); // namespace URI -> tags[]
     const keys = getFilteredKeys(typeObject);
     
     debugContext("extractAllTagsForXmlBody", `Extrayendo tags de tipo con ${keys.length} propiedad(es) en namespace "${currentNamespace}"`);
@@ -98,6 +110,12 @@ export function extractAllTagsForXmlBody(
                         const refNamespace = referencedTypeObject[NAMESPACE_KEY];
                         if (refNamespace) {
                             elementNamespace = refNamespace;
+                            // Registrar el namespace del tipo referenciado
+                            const refNamespacePrefix = extractNamespacePrefix(refNamespace);
+                            if (!foundNamespaces.has(refNamespacePrefix)) {
+                                foundNamespaces.set(refNamespacePrefix, refNamespace);
+                                debugContext("extractAllTagsForXmlBody", `Registrando namespace adicional: "${refNamespacePrefix}" -> "${refNamespace}"`);
+                            }
                         }
                         // Si el tipo referenciado tiene un wrapper 'type', extraer el contenido
                         if ('type' in referencedTypeObject && typeof referencedTypeObject.type === 'object') {
@@ -116,19 +134,29 @@ export function extractAllTagsForXmlBody(
         const namespace = elementNamespace || currentNamespace;
         const namespacePrefix = extractNamespacePrefix(namespace);
         
-        // Si el elemento tiene el mismo namespace que el base, agregar el tag
-        // Esto incluye tanto elementos qualified como no qualified que se usarán en el XML
-        if (namespacePrefix === baseNamespacePrefix || namespace === currentNamespace) {
-            debugContext("extractAllTagsForXmlBody", `Agregando tag "${tagLocalName}" al namespace "${namespacePrefix}"`);
-            result.push(tagLocalName);
+        // Registrar el namespace si es diferente del base
+        if (namespace !== currentNamespace && !foundNamespaces.has(namespacePrefix)) {
+            foundNamespaces.set(namespacePrefix, namespace);
+            debugContext("extractAllTagsForXmlBody", `Registrando namespace del elemento: "${namespacePrefix}" -> "${namespace}"`);
         }
+        
+        // Agregar el tag al namespace correspondiente (puede ser el base o un namespace diferente)
+        // Esto incluye tanto elementos qualified como no qualified que se usarán en el XML
+        debugContext("extractAllTagsForXmlBody", `Agregando tag "${tagLocalName}" al namespace "${namespacePrefix}" (namespace: "${namespace}")`);
+        result.push(tagLocalName);
+        
+        // También registrar el tag en su namespace específico
+        if (!tagsByNamespace.has(namespace)) {
+            tagsByNamespace.set(namespace, []);
+        }
+        tagsByNamespace.get(namespace)!.push(tagLocalName);
         
         // Si el elemento tiene un tipo complejo (ya sea inline o referenciado), extraer sus tags también
         if (elementTypeValue && typeof elementTypeValue === 'object' && elementTypeValue !== null) {
             const nestedTypeObject = elementTypeValue as TypeObject;
             const nestedNamespace = nestedTypeObject[NAMESPACE_KEY] || namespace;
             debugContext("extractAllTagsForXmlBody", `Extrayendo tags anidados de "${tagLocalName}" en namespace "${nestedNamespace}"`);
-            const nestedTags = extractAllTagsForXmlBody(
+            const nestedResult = extractAllTagsForXmlBody(
                 nestedTypeObject,
                 namespacesTypeMapping,
                 baseNamespacePrefix,
@@ -137,15 +165,28 @@ export function extractAllTagsForXmlBody(
                 schemaObject,
                 allComplexTypes
             );
-            if (nestedTags.length > 0) {
-                debugContext("extractAllTagsForXmlBody", `  → Encontrados ${nestedTags.length} tag(s) anidado(s) en "${tagLocalName}"`);
+            if (nestedResult.tags.length > 0) {
+                debugContext("extractAllTagsForXmlBody", `  → Encontrados ${nestedResult.tags.length} tag(s) anidado(s) en "${tagLocalName}"`);
             }
-            result.push(...nestedTags);
+            result.push(...nestedResult.tags);
+            // Agregar namespaces encontrados en los tipos anidados
+            for (const [prefix, uri] of nestedResult.namespaces) {
+                if (!foundNamespaces.has(prefix)) {
+                    foundNamespaces.set(prefix, uri);
+                }
+            }
+            // Agregar tags por namespace de los tipos anidados
+            for (const [nsUri, tags] of nestedResult.tagsByNamespace) {
+                if (!tagsByNamespace.has(nsUri)) {
+                    tagsByNamespace.set(nsUri, []);
+                }
+                tagsByNamespace.get(nsUri)!.push(...tags);
+            }
         }
     }
     
-    debugContext("extractAllTagsForXmlBody", `Total de tags extraídos: ${result.length}`);
-    return result;
+    debugContext("extractAllTagsForXmlBody", `Total de tags extraídos: ${result.length}, namespaces encontrados: ${foundNamespaces.size}`);
+    return { tags: result, namespaces: foundNamespaces, tagsByNamespace };
 }
 
 /**

@@ -1,6 +1,6 @@
 import { toCamelCase } from "../../util.js";
 import { extractLocalName, getFilteredKeys } from "../utils.js";
-import type { TypeObject, TypeDefinition, NamespaceTypesMapping } from "../types.js";
+import type { TypeObject, TypeDefinition, NamespaceTypesMapping, NamespacePrefixesMapping } from "../types.js";
 import { generateXmlPropertyCode } from "./xml-property.js";
 import { resolveReferencedType, resolveNestedType } from "./type-resolution.js";
 
@@ -14,7 +14,8 @@ export function generateXmlBodyCode(
     baseTypeObject: TypeObject,
     propsInterfaceName?: string,
     schemaObject?: any,
-    allComplexTypes?: any
+    allComplexTypes?: any,
+    prefixesMapping?: NamespacePrefixesMapping
 ): string {
     const keys = getFilteredKeys(baseTypeObject);
     // Extraer nombre local del tipo base
@@ -44,11 +45,11 @@ export function generateXmlBodyCode(
                         
                         if (nestedReferencedElement && typeof nestedReferencedElement === 'object') {
                             // Usar el tipo anidado directamente
-                            return generateXmlBodyCode(baseNamespacePrefix, namespacesTypeMapping, baseTypeName, nestedReferencedElement, propsInterfaceName, schemaObject, allComplexTypes);
+                            return generateXmlBodyCode(baseNamespacePrefix, namespacesTypeMapping, baseTypeName, nestedReferencedElement, propsInterfaceName, schemaObject, allComplexTypes, prefixesMapping);
                         }
                     }
                     // Si encontramos el elemento referenciado, expandir su contenido
-                    return generateXmlBodyCode(baseNamespacePrefix, namespacesTypeMapping, baseTypeName, referencedElement, propsInterfaceName, schemaObject, allComplexTypes);
+                    return generateXmlBodyCode(baseNamespacePrefix, namespacesTypeMapping, baseTypeName, referencedElement, propsInterfaceName, schemaObject, allComplexTypes, prefixesMapping);
                 }
             }
             
@@ -57,7 +58,7 @@ export function generateXmlBodyCode(
                 const typeKeys = getFilteredKeys(typeValue as TypeObject);
                 // Si tiene propiedades, procesar recursivamente el objeto type
                 if (typeKeys.length > 0) {
-                    return generateXmlBodyCode(baseNamespacePrefix, namespacesTypeMapping, baseTypeName, typeValue as TypeObject, propsInterfaceName, schemaObject, allComplexTypes);
+                    return generateXmlBodyCode(baseNamespacePrefix, namespacesTypeMapping, baseTypeName, typeValue as TypeObject, propsInterfaceName, schemaObject, allComplexTypes, prefixesMapping);
                 }
             }
         }
@@ -88,7 +89,8 @@ export function generateXmlBodyCode(
                     element as TypeDefinition,
                     null,
                     propertyPath,
-                    true // El padre (root element) siempre es qualified
+                    true, // El padre (root element) siempre es qualified
+                    prefixesMapping
                 );
             }
             return '';
