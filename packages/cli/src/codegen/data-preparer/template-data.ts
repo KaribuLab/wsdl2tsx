@@ -2,7 +2,7 @@ import { toPascalCase, toCamelCase } from "../../util.js";
 import { NAMESPACE_KEY, XML_SCHEMA_URI } from "../constants.js";
 import type { HeaderData, NamespacePrefixesMapping, NamespaceTagsMapping, NamespaceTypesMapping, TemplateData, TypeObject } from "../types.js";
 import { extractLocalName } from "../utils.js";
-import { generateXmlBodyCode } from "../xml-generator.js";
+import { generateXmlBodyCode } from "../xml-generator/index.js";
 import { extractAllNamespaceMappings } from "../namespaces.js";
 import { prepareSimpleTypesData } from "./simple-types.js";
 import { preparePropsInterfaceData } from "./props-interface.js";
