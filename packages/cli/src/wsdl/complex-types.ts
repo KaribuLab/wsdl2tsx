@@ -8,7 +8,7 @@ import {
     getSequenceNode,
     getNamespacesFromNode,
 } from "./node-extractors.js";
-import { complexTypeToObject } from "./processors.js";
+import { complexTypeToObject } from "./processors/index.js";
 
 export const complexTypesFromSchema = async (wsdlFile: string, node: XmlNode, namespaces: Map<string, string> | undefined): Promise<ComplexTypes> => {
     const targetNamespace = node.targetNamespace;

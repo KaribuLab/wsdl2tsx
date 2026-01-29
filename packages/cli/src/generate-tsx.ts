@@ -19,9 +19,9 @@ import {
 import { loadXsd } from "./wsdl/loader.js";
 import {
     extractAllNamespaceMappings,
-    prepareTemplateData,
     extractLocalName,
 } from "./codegen/index.js";
+import { prepareTemplateData } from "./codegen/data-preparer/index.js";
 import { registerHandlebarsHelpers } from "./template-helpers.js";
 import Handlebars, { type TemplateDelegate } from "handlebars";
 import fs from "fs";
