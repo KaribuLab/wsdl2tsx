@@ -142,13 +142,128 @@ export function generateXmlPropertyCode(
 /**
  * Genera el código del cuerpo XML principal
  */
-export function generateXmlBodyCode(baseNamespacePrefix: string, namespacesTypeMapping: NamespaceTypesMapping, baseTypeName: string, baseTypeObject: TypeObject, propsInterfaceName?: string): string {
+export function generateXmlBodyCode(baseNamespacePrefix: string, namespacesTypeMapping: NamespaceTypesMapping, baseTypeName: string, baseTypeObject: TypeObject, propsInterfaceName?: string, schemaObject?: any, allComplexTypes?: any): string {
     const keys = getFilteredKeys(baseTypeObject);
     // Extraer nombre local del tipo base
     const baseTypeLocalName = extractLocalName(baseTypeName);
     
     // El elemento raíz siempre debe tener prefijo (es un elemento global)
     // Los elementos hijos dependen de $qualified
+    
+    // Si solo hay una clave y es un tipo complejo con type como objeto, procesar el type directamente
+    if (keys.length === 1) {
+        const singleKey = keys[0]!;
+        const element = baseTypeObject[singleKey]!;
+        
+        if (typeof element === 'object' && element !== null && 'type' in element) {
+            const typeValue = (element as any).type;
+            
+            // Si type es un string (referencia a elemento o tipo), intentar resolverla desde schemaObject y allComplexTypes
+            if (typeof typeValue === 'string' && (schemaObject || allComplexTypes)) {
+                // Buscar el elemento/tipo referenciado primero en schemaObject, luego en allComplexTypes
+                let referencedElement = schemaObject?.[typeValue];
+                
+                // Si no se encuentra en schemaObject, buscar en allComplexTypes
+                if (!referencedElement && allComplexTypes) {
+                    referencedElement = allComplexTypes[typeValue];
+                }
+                
+                // Si no se encuentra exactamente, buscar por nombre local en schemaObject
+                if (!referencedElement && schemaObject) {
+                    const typeLocalName = typeValue.split(':').pop() || typeValue;
+                    const matchingKey = Object.keys(schemaObject).find(key => {
+                        if (key === '$namespace' || key === '$qualified') return false;
+                        const keyLocalName = key.split(':').pop() || key;
+                        return keyLocalName === typeLocalName || 
+                               key === typeValue ||
+                               key.endsWith(`:${typeLocalName}`) ||
+                               typeValue.endsWith(keyLocalName);
+                    });
+                    if (matchingKey) {
+                        referencedElement = schemaObject[matchingKey];
+                    }
+                }
+                
+                // Si todavía no se encuentra, buscar por nombre local en allComplexTypes
+                if (!referencedElement && allComplexTypes) {
+                    const typeLocalName = typeValue.split(':').pop() || typeValue;
+                    const matchingKey = Object.keys(allComplexTypes).find(key => {
+                        const keyLocalName = key.split(':').pop() || key;
+                        return keyLocalName === typeLocalName || 
+                               key === typeValue ||
+                               key.endsWith(`:${typeLocalName}`) ||
+                               typeValue.endsWith(keyLocalName);
+                    });
+                    if (matchingKey) {
+                        referencedElement = allComplexTypes[matchingKey];
+                    }
+                }
+                
+                if (referencedElement && typeof referencedElement === 'object') {
+                    // Si el elemento referenciado tiene un type que es string, seguir resolviendo
+                    if ('type' in referencedElement && typeof referencedElement.type === 'string') {
+                        // Continuar resolviendo recursivamente - buscar primero en schemaObject, luego en allComplexTypes
+                        const nestedTypeValue = referencedElement.type;
+                        let nestedReferencedElement = schemaObject?.[nestedTypeValue];
+                        
+                        if (!nestedReferencedElement && allComplexTypes) {
+                            nestedReferencedElement = allComplexTypes[nestedTypeValue];
+                        }
+                        
+                        // Si no se encuentra exactamente, buscar por nombre local
+                        if (!nestedReferencedElement) {
+                            const nestedTypeLocalName = nestedTypeValue.split(':').pop() || nestedTypeValue;
+                            
+                            // Buscar primero en schemaObject
+                            if (schemaObject) {
+                                const nestedMatchingKey = Object.keys(schemaObject).find(key => {
+                                    if (key === '$namespace' || key === '$qualified') return false;
+                                    const keyLocalName = key.split(':').pop() || key;
+                                    return keyLocalName === nestedTypeLocalName || 
+                                           key === nestedTypeValue ||
+                                           key.endsWith(`:${nestedTypeLocalName}`) ||
+                                           nestedTypeValue.endsWith(keyLocalName);
+                                });
+                                if (nestedMatchingKey) {
+                                    nestedReferencedElement = schemaObject[nestedMatchingKey];
+                                }
+                            }
+                            
+                            // Si todavía no se encuentra, buscar en allComplexTypes
+                            if (!nestedReferencedElement && allComplexTypes) {
+                                const nestedMatchingKey = Object.keys(allComplexTypes).find(key => {
+                                    const keyLocalName = key.split(':').pop() || key;
+                                    return keyLocalName === nestedTypeLocalName || 
+                                           key === nestedTypeValue ||
+                                           key.endsWith(`:${nestedTypeLocalName}`) ||
+                                           nestedTypeValue.endsWith(keyLocalName);
+                                });
+                                if (nestedMatchingKey) {
+                                    nestedReferencedElement = allComplexTypes[nestedMatchingKey];
+                                }
+                            }
+                        }
+                        
+                        if (nestedReferencedElement && typeof nestedReferencedElement === 'object') {
+                            // Usar el tipo anidado directamente
+                            return generateXmlBodyCode(baseNamespacePrefix, namespacesTypeMapping, baseTypeName, nestedReferencedElement, propsInterfaceName, schemaObject, allComplexTypes);
+                        }
+                    }
+                    // Si encontramos el elemento referenciado, expandir su contenido
+                    return generateXmlBodyCode(baseNamespacePrefix, namespacesTypeMapping, baseTypeName, referencedElement, propsInterfaceName, schemaObject, allComplexTypes);
+                }
+            }
+            
+            // Si type es un objeto (tipo complejo anidado), procesar ese objeto directamente
+            if (typeof typeValue === 'object' && typeValue !== null) {
+                const typeKeys = getFilteredKeys(typeValue as TypeObject);
+                // Si tiene propiedades, procesar recursivamente el objeto type
+                if (typeKeys.length > 0) {
+                    return generateXmlBodyCode(baseNamespacePrefix, namespacesTypeMapping, baseTypeName, typeValue as TypeObject, propsInterfaceName, schemaObject, allComplexTypes);
+                }
+            }
+        }
+    }
     
     // Para elementos raíz, las propiedades son directas (props.intA, props.intB)
     // No necesitamos usar propsInterfaceName aquí porque estamos en el nivel raíz

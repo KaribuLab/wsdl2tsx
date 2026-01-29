@@ -11,8 +11,11 @@ import {
     getOperationNodes,
     getOperationName,
     getRequestTypeFromOperation,
+    getImportNode,
+    getSchemaNode,
     type XmlNode,
 } from "./wsdl/index.js";
+import { loadXsd } from "./wsdl/loader.js";
 import {
     extractAllNamespaceMappings,
     prepareTemplateData,
@@ -174,8 +177,12 @@ export async function generateTsxFromWsdl(
     }
     
     // Procesar todos los schemas para obtener elementos y construir schemaObject
+    // También procesar elementos de XSDs importados
     let schemaObject: any = {};
-    for (const schemaNode of schemaNodes) {
+    
+    // Función auxiliar para procesar un schema y sus imports recursivamente
+    const processSchemaAndImports = async (schemaNode: XmlNode): Promise<void> => {
+        // Procesar el schema actual
         const schemaObj = schemaToObject(schemaNode, allNamespaces, allComplexTypes);
         // Combinar objetos, evitando sobrescribir $namespace
         for (const [key, value] of Object.entries(schemaObj)) {
@@ -187,6 +194,32 @@ export async function generateTsxFromWsdl(
         if (!schemaObject['$namespace'] && schemaObj['$namespace']) {
             schemaObject['$namespace'] = schemaObj['$namespace'];
         }
+        
+        // Procesar imports del schema
+        const importNode = getImportNode(schemaNode);
+        if (importNode !== undefined) {
+            const imports = Array.isArray(importNode) ? importNode : [importNode];
+            for (const item of imports) {
+                if (item.schemaLocation) {
+                    try {
+                        const importedXsd = await loadXsd(wsdlPath, item.schemaLocation);
+                        const importedSchemaNode = getSchemaNode(importedXsd);
+                        if (importedSchemaNode) {
+                            // Procesar recursivamente el schema importado
+                            await processSchemaAndImports(importedSchemaNode);
+                        }
+                    } catch (error: any) {
+                        // Si falla al cargar el XSD externo, continuar sin él
+                        console.warn(`Advertencia: No se pudo cargar el XSD importado desde ${item.schemaLocation}: ${error.message}`);
+                    }
+                }
+            }
+        }
+    };
+    
+    // Procesar todos los schemas principales y sus imports
+    for (const schemaNode of schemaNodes) {
+        await processSchemaAndImports(schemaNode);
     }
     
     // Validar que schemaObject tenga contenido
@@ -362,7 +395,9 @@ export async function generateTsxFromWsdl(
             namespacesTypeMapping,
             soapNamespaceURI,
             baseNamespacePrefix,
-            allTypesForInterfaces // Pasar allTypesForInterfaces como parámetro adicional para interfaces
+            allTypesForInterfaces, // Pasar allTypesForInterfaces como parámetro adicional para interfaces
+            schemaObject, // Pasar schemaObject para resolver referencias de elementos
+            allComplexTypes // Pasar allComplexTypes para resolver tipos complejos referenciados
         );
         
         // Compilar el template y generar el código
