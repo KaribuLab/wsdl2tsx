@@ -1,7 +1,8 @@
 import { NAMESPACE_KEY, XML_SCHEMA_URI } from "../constants.js";
 import type { NamespacePrefixesMapping, NamespaceTagsMapping, NamespaceTypesMapping, TemplateData, TypeObject, InterfaceData, PropsInterfaceData } from "../types.js";
-import { extractLocalName } from "../utils.js";
+import { extractLocalName, getFilteredKeys, validatePropertyOrder } from "../utils.js";
 import { toPascalCase } from "../../util.js";
+import { debugContext, warn } from "../../logger.js";
 import { generateXmlBodyCode } from "../xml-generator/index.js";
 import { prepareSimpleTypesData } from "./simple-types.js";
 import { preparePropsInterfaceData } from "./props-interface.js";
@@ -28,6 +29,11 @@ export function prepareTemplateData(
     responseAllTypesForInterfaces?: TypeObject // Opcional: tipos referenciados del response
 ): TemplateData {
     const simpleTypes = prepareSimpleTypesData(requestTypeObject, XML_SCHEMA_URI);
+    
+    // IMPORTANTE: Tanto preparePropsInterfaceData como generateXmlBodyCode deben usar el mismo requestTypeObject
+    // sin transformaciones intermedias para garantizar que el orden de propiedades sea idéntico.
+    // El orden se preserva desde el WSDL original a través de processElementsToObject() que itera
+    // sobre el array elementNode preservando el orden de inserción.
     const propsInterface = preparePropsInterfaceData(requestType, requestTypeObject, allTypesForInterfaces, schemaObject, allComplexTypes);
     
     // Para interfaces, usar allTypesForInterfaces si está disponible, sino usar requestTypeObject
@@ -68,6 +74,69 @@ export function prepareTemplateData(
     // Solo usar propsInterfaceName para headers
     // Nota: No pasamos tagUsageCollector aquí porque ya se recolectó la información en extractAllNamespaceMappings
     const xmlBody = generateXmlBodyCode(baseNamespacePrefix, namespacesTypeMapping, requestType, requestTypeObject, undefined, schemaObject, allComplexTypes, namespacesPrefixMapping);
+    
+    // Validar que el orden de propiedades en propsInterface coincide con el orden en XML
+    // NOTA: Cuando preparePropsInterfaceData expande tipos referenciados, las propiedades se aplanan
+    // al nivel superior, mientras que generateXmlBodyCode mantiene los tags intermedios.
+    // Por lo tanto, la validación solo es precisa cuando no hay expansión de tipos referenciados.
+    
+    // Extraer orden de props (excluyendo headers que se agregan después)
+    const propsOrder = propsInterface.properties
+        .filter(prop => {
+            // Excluir headers del body (se procesan por separado)
+            return !headers.some(h => extractLocalName(h.partName) === prop.name);
+        })
+        .map(prop => prop.name);
+    
+    // Extraer orden de XML body (solo propiedades del body, no headers)
+    const bodyKeys = getFilteredKeys(requestTypeObject);
+    const xmlOrder = bodyKeys.map(key => extractLocalName(key));
+    
+    // Validar orden del body solo si las longitudes coinciden
+    // Si no coinciden, probablemente hay expansión de tipos referenciados (comportamiento esperado)
+    if (propsOrder.length === xmlOrder.length) {
+        const orderValidation = validatePropertyOrder(propsOrder, xmlOrder, `body-${requestType}`);
+        if (!orderValidation.isValid) {
+            warn(`⚠️  Advertencia: El orden de propiedades no coincide entre props y XML para "${requestType}"`);
+            debugContext("prepareTemplateData", `Orden en props: ${propsOrder.join(' -> ')}`);
+            debugContext("prepareTemplateData", `Orden en XML: ${xmlOrder.join(' -> ')}`);
+            if (orderValidation.differences) {
+                orderValidation.differences.forEach(diff => {
+                    debugContext("prepareTemplateData", `  Diferencia en índice ${diff.index}: props="${diff.props}" vs xml="${diff.xml}"`);
+                });
+            }
+        } else {
+            debugContext("prepareTemplateData", `✓ Orden de propiedades del body validado correctamente para "${requestType}"`);
+        }
+    } else {
+        // Diferencia en longitud: probablemente hay expansión de tipos referenciados
+        debugContext("prepareTemplateData", `Nota: Props tiene ${propsOrder.length} propiedades, XML tiene ${xmlOrder.length} propiedades. Esto puede indicar expansión de tipos referenciados (comportamiento esperado).`);
+        debugContext("prepareTemplateData", `Orden en props: ${propsOrder.join(' -> ')}`);
+        debugContext("prepareTemplateData", `Orden en XML (nivel raíz): ${xmlOrder.join(' -> ')}`);
+    }
+    
+    // Validar orden de headers
+    if (headers.length > 0) {
+        const headersPropsOrder = propsInterface.properties
+            .filter(prop => headers.some(h => extractLocalName(h.partName) === prop.name))
+            .map(prop => prop.name);
+        
+        const headersXmlOrder = headers.map(h => extractLocalName(h.partName));
+        
+        const headersOrderValidation = validatePropertyOrder(headersPropsOrder, headersXmlOrder, `headers-${requestType}`);
+        if (!headersOrderValidation.isValid) {
+            warn(`⚠️  Advertencia: El orden de headers no coincide entre props y XML para "${requestType}"`);
+            debugContext("prepareTemplateData", `Orden de headers en props: ${headersPropsOrder.join(' -> ')}`);
+            debugContext("prepareTemplateData", `Orden de headers en XML: ${headersXmlOrder.join(' -> ')}`);
+            if (headersOrderValidation.differences) {
+                headersOrderValidation.differences.forEach(diff => {
+                    debugContext("prepareTemplateData", `  Diferencia en índice ${diff.index}: props="${diff.props}" vs xml="${diff.xml}"`);
+                });
+            }
+        } else {
+            debugContext("prepareTemplateData", `✓ Orden de headers validado correctamente para "${requestType}"`);
+        }
+    }
     
     // Usar nombre local del requestType para el template
     const requestTypeLocalName = extractLocalName(requestType);

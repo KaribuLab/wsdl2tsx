@@ -1,5 +1,6 @@
 import { toCamelCase } from "../../util.js";
 import { extractLocalName, getFilteredKeys } from "../utils.js";
+import { debugContext } from "../../logger.js";
 import type { TypeObject, TypeDefinition, NamespaceTypesMapping, NamespacePrefixesMapping, TagUsageCollector } from "../types.js";
 import { generateXmlPropertyCode } from "./xml-property.js";
 import { resolveReferencedType, resolveNestedType } from "./type-resolution.js";
@@ -19,8 +20,13 @@ export function generateXmlBodyCode(
     tagUsageCollector?: TagUsageCollector
 ): string {
     const keys = getFilteredKeys(baseTypeObject);
+    const localNames = keys.map(key => extractLocalName(key));
     // Extraer nombre local del tipo base
     const baseTypeLocalName = extractLocalName(baseTypeName);
+    
+    // Log del orden de propiedades para validación
+    debugContext("generateXmlBodyCode", `Generando XML para tipo "${baseTypeName}" con ${keys.length} propiedades: ${keys.join(', ')}`);
+    debugContext("generateXmlBodyCode", `Orden de tags XML (nombres locales): ${localNames.join(' -> ')}`);
     
     // El elemento raíz siempre debe tener prefijo (es un elemento global)
     // Los elementos hijos dependen de $qualified

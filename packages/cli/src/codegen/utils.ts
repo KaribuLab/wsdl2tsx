@@ -124,6 +124,44 @@ export function extractLocalName(fullName: string): string {
 }
 
 /**
+ * Valida que el orden de las propiedades coincida entre props y XML
+ * Retorna true si el orden es idéntico, false si hay diferencias
+ */
+export function validatePropertyOrder(
+    propsOrder: string[],
+    xmlOrder: string[],
+    context: string = 'unknown'
+): { isValid: boolean; differences?: Array<{ index: number; props: string; xml: string }> } {
+    if (propsOrder.length !== xmlOrder.length) {
+        return {
+            isValid: false,
+            differences: [{
+                index: -1,
+                props: `Length: ${propsOrder.length}`,
+                xml: `Length: ${xmlOrder.length}`
+            }]
+        };
+    }
+    
+    const differences: Array<{ index: number; props: string; xml: string }> = [];
+    
+    for (let i = 0; i < propsOrder.length; i++) {
+        if (propsOrder[i] !== xmlOrder[i]) {
+            differences.push({
+                index: i,
+                props: propsOrder[i] || '(missing)',
+                xml: xmlOrder[i] || '(missing)'
+            });
+        }
+    }
+    
+    return {
+        isValid: differences.length === 0,
+        differences: differences.length > 0 ? differences : undefined
+    };
+}
+
+/**
  * Genera un hash simple de un string
  */
 function generateHash(str: string, seed: number = 0): number {

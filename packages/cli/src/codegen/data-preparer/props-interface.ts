@@ -11,7 +11,9 @@ import { debugContext } from "../../logger.js";
  */
 export function preparePropsInterfaceData(typeName: string, typeObject: TypeObject, allTypesForInterfaces?: TypeObject, schemaObject?: any, allComplexTypes?: any): PropsInterfaceData {
     const keys = getFilteredKeys(typeObject);
+    const localNames = keys.map(key => extractLocalName(key));
     debugContext("preparePropsInterfaceData", `Procesando tipo "${typeName}" con ${keys.length} propiedades: ${keys.join(', ')}`);
+    debugContext("preparePropsInterfaceData", `Orden de propiedades (nombres locales): ${localNames.join(' -> ')}`);
     
     // Si solo hay una clave y es un tipo complejo con type como objeto, extraer propiedades del type
     if (keys.length === 1) {
@@ -29,10 +31,91 @@ export function preparePropsInterfaceData(typeName: string, typeObject: TypeObje
                 
                 // Buscar el elemento/tipo referenciado primero en schemaObject, luego en allComplexTypes
                 let referencedElement = schemaObject?.[typeValue];
+                if (referencedElement) {
+                    const refType = typeof referencedElement;
+                    const hasType = typeof referencedElement === 'object' && referencedElement !== null && 'type' in referencedElement;
+                    const typeValueInRef = hasType ? (referencedElement as any).type : null;
+                    const typeOfTypeValue = typeof typeValueInRef;
+                    debugContext("preparePropsInterfaceData", `Tipo encontrado directamente en schemaObject[${typeValue}]: tipo=${refType}, tiene 'type'=${hasType}, typeValue=${typeValueInRef} (${typeOfTypeValue})`);
+                }
+                
+                // Si el elemento encontrado es un wrapper con 'type' como string u objeto, intentar resolver el tipo completo
+                if (referencedElement && typeof referencedElement === 'object' && 'type' in referencedElement) {
+                    const typeValueInElement = referencedElement.type;
+                    
+                    // Si type es un string (referencia), buscar el tipo completo
+                    if (typeof typeValueInElement === 'string') {
+                        debugContext("preparePropsInterfaceData", `Tipo encontrado es un wrapper con type="${typeValueInElement}", buscando tipo completo`);
+                        
+                        // Buscar el tipo completo en allComplexTypes primero (los tipos importados suelen estar ahí)
+                        let fullType = allComplexTypes?.[typeValueInElement];
+                        if (fullType) {
+                            const fullTypeKeys = getFilteredKeys(fullType);
+                            debugContext("preparePropsInterfaceData", `Tipo completo encontrado en allComplexTypes con ${fullTypeKeys.length} propiedades: ${fullTypeKeys.join(', ')}`);
+                        }
+                        
+                        if (!fullType && schemaObject) {
+                            fullType = schemaObject[typeValueInElement];
+                            if (fullType && typeof fullType === 'object') {
+                                const fullTypeKeys = getFilteredKeys(fullType);
+                                debugContext("preparePropsInterfaceData", `Tipo completo encontrado en schemaObject con ${fullTypeKeys.length} propiedades: ${fullTypeKeys.join(', ')}`);
+                            }
+                        }
+                        
+                        // Si todavía no se encuentra, buscar por nombre local
+                        if (!fullType) {
+                            const wrappedTypeLocalName = typeValueInElement.split(':').pop() || typeValueInElement;
+                            debugContext("preparePropsInterfaceData", `Buscando tipo completo por nombre local "${wrappedTypeLocalName}"`);
+                            
+                            if (allComplexTypes) {
+                                const matchingKey = Object.keys(allComplexTypes).find(key => {
+                                    const keyLocalName = key.split(':').pop() || key;
+                                    return keyLocalName === wrappedTypeLocalName;
+                                });
+                                if (matchingKey) {
+                                    fullType = allComplexTypes[matchingKey];
+                                    const fullTypeKeys = getFilteredKeys(fullType);
+                                    debugContext("preparePropsInterfaceData", `✓ Tipo completo encontrado en allComplexTypes por nombre local "${matchingKey}" con ${fullTypeKeys.length} propiedades`);
+                                }
+                            }
+                            
+                            if (!fullType && schemaObject) {
+                                const matchingKey = Object.keys(schemaObject).find(key => {
+                                    if (key === '$namespace' || key === '$qualified') return false;
+                                    const keyLocalName = key.split(':').pop() || key;
+                                    return keyLocalName === wrappedTypeLocalName;
+                                });
+                                if (matchingKey) {
+                                    fullType = schemaObject[matchingKey];
+                                    if (fullType && typeof fullType === 'object') {
+                                        const fullTypeKeys = getFilteredKeys(fullType);
+                                        debugContext("preparePropsInterfaceData", `✓ Tipo completo encontrado en schemaObject por nombre local "${matchingKey}" con ${fullTypeKeys.length} propiedades`);
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (fullType && typeof fullType === 'object') {
+                            // Usar el tipo completo en lugar del wrapper
+                            const fullTypeKeys = getFilteredKeys(fullType);
+                            debugContext("preparePropsInterfaceData", `✓ Usando tipo completo con ${fullTypeKeys.length} propiedades en lugar del wrapper`);
+                            referencedElement = fullType;
+                        } else {
+                            debugContext("preparePropsInterfaceData", `⚠ Tipo completo no encontrado para "${typeValueInElement}", usando wrapper`);
+                        }
+                    } else if (typeof typeValueInElement === 'object' && typeValueInElement !== null) {
+                        // Si type es un objeto, usar ese objeto directamente (es el tipo completo)
+                        debugContext("preparePropsInterfaceData", `Tipo encontrado tiene type como objeto, usando directamente`);
+                        referencedElement = typeValueInElement;
+                    }
+                }
                 
                 // Si no se encuentra en schemaObject, buscar en allComplexTypes
                 if (!referencedElement && allComplexTypes) {
                     referencedElement = allComplexTypes[typeValue];
+                    if (referencedElement) {
+                        debugContext("preparePropsInterfaceData", `Tipo encontrado en allComplexTypes[${typeValue}]`);
+                    }
                 }
                 
                 // Si no se encuentra exactamente, buscar por nombre local en schemaObject
@@ -76,10 +159,24 @@ export function preparePropsInterfaceData(typeName: string, typeObject: TypeObje
                 if (!referencedElement) {
                     debugContext("preparePropsInterfaceData", `✗ No se encontró la referencia "${typeValue}"`);
                 } else {
-                    debugContext("preparePropsInterfaceData", `✓ Referencia resuelta (${typeof referencedElement === 'object' ? Object.keys(referencedElement).length + ' propiedades' : 'tipo simple'})`);
+                    const refKeys = typeof referencedElement === 'object' ? getFilteredKeys(referencedElement) : [];
+                    const refLocalNames = refKeys.map(k => extractLocalName(k));
+                    debugContext("preparePropsInterfaceData", `✓ Referencia resuelta (${refKeys.length} propiedades): ${refKeys.join(', ')}`);
+                    debugContext("preparePropsInterfaceData", `  Propiedades del tipo referenciado (nombres locales): ${refLocalNames.join(' -> ')}`);
                 }
                 
                 if (referencedElement && typeof referencedElement === 'object') {
+                    // IMPORTANTE: Cuando un tipo referenciado tiene un 'type' que es string, significa que es un wrapper
+                    // que referencia a otro tipo. En este caso, debemos expandir las propiedades del tipo referenciado,
+                    // pero también debemos incluir las propiedades del wrapper si las hay.
+                    // Sin embargo, si el wrapper solo tiene 'type' y propiedades internas, debemos expandir el tipo referenciado.
+                    
+                    const refKeys = getFilteredKeys(referencedElement);
+                    const hasOnlyTypeProperty = refKeys.length === 0 && 'type' in referencedElement;
+                    const hasTypeAndOtherProperties = refKeys.length > 0 && 'type' in referencedElement;
+                    
+                    debugContext("preparePropsInterfaceData", `Tipo referenciado tiene ${refKeys.length} propiedades además de 'type'`);
+                    
                     // Si el elemento referenciado tiene un type que es string, seguir resolviendo
                     if ('type' in referencedElement && typeof referencedElement.type === 'string') {
                         const nestedTypeValue = referencedElement.type;
@@ -129,16 +226,37 @@ export function preparePropsInterfaceData(typeName: string, typeObject: TypeObje
                         }
                         
                         if (nestedReferencedElement && typeof nestedReferencedElement === 'object') {
-                            debugContext("preparePropsInterfaceData", `Expandiendo contenido del tipo anidado`);
-                            // Limpiar propiedades internas antes de expandir
-                            const cleanedNestedElement = { ...nestedReferencedElement };
-                            Object.keys(cleanedNestedElement).forEach(key => {
-                                if (key.startsWith('_')) {
-                                    delete (cleanedNestedElement as any)[key];
-                                }
-                            });
-                            // Usar el tipo anidado directamente
-                            return preparePropsInterfaceData(typeName, cleanedNestedElement, allTypesForInterfaces, schemaObject, allComplexTypes);
+                            const nestedKeys = getFilteredKeys(nestedReferencedElement);
+                            const nestedLocalNames = nestedKeys.map(k => extractLocalName(k));
+                            debugContext("preparePropsInterfaceData", `Tipo anidado resuelto tiene ${nestedKeys.length} propiedades: ${nestedKeys.join(', ')}`);
+                            debugContext("preparePropsInterfaceData", `  Propiedades del tipo anidado (nombres locales): ${nestedLocalNames.join(' -> ')}`);
+                            
+                            // Si el tipo referenciado solo tiene 'type' (es un wrapper), expandir el tipo anidado directamente
+                            // Si tiene otras propiedades además de 'type', debemos combinarlas
+                            if (hasOnlyTypeProperty || (!hasTypeAndOtherProperties && refKeys.length === 0)) {
+                                debugContext("preparePropsInterfaceData", `Expandiendo contenido del tipo anidado (wrapper sin otras propiedades)`);
+                                // Limpiar propiedades internas antes de expandir
+                                const cleanedNestedElement = { ...nestedReferencedElement };
+                                Object.keys(cleanedNestedElement).forEach(key => {
+                                    if (key.startsWith('_')) {
+                                        delete (cleanedNestedElement as any)[key];
+                                    }
+                                });
+                                // Usar el tipo anidado directamente
+                                return preparePropsInterfaceData(typeName, cleanedNestedElement, allTypesForInterfaces, schemaObject, allComplexTypes);
+                            } else {
+                                // El tipo referenciado tiene propiedades además de 'type', debemos combinarlas
+                                debugContext("preparePropsInterfaceData", `Combinando propiedades del wrapper con el tipo anidado`);
+                                // TODO: Implementar combinación de propiedades si es necesario
+                                // Por ahora, expandir el tipo anidado
+                                const cleanedNestedElement = { ...nestedReferencedElement };
+                                Object.keys(cleanedNestedElement).forEach(key => {
+                                    if (key.startsWith('_')) {
+                                        delete (cleanedNestedElement as any)[key];
+                                    }
+                                });
+                                return preparePropsInterfaceData(typeName, cleanedNestedElement, allTypesForInterfaces, schemaObject, allComplexTypes);
+                            }
                         }
                     }
                     // Si encontramos el elemento referenciado, expandir su contenido
@@ -149,6 +267,7 @@ export function preparePropsInterfaceData(typeName: string, typeObject: TypeObje
                             delete (cleanedReferencedElement as any)[key];
                         }
                     });
+                    debugContext("preparePropsInterfaceData", `Expandiendo tipo referenciado directamente (sin type anidado)`);
                     return preparePropsInterfaceData(typeName, cleanedReferencedElement, allTypesForInterfaces, schemaObject, allComplexTypes);
                 }
             }
