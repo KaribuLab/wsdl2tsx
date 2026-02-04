@@ -39,6 +39,27 @@ export function processHeaders(
             
             debugContext("processHeaders", `✓ Header "${headerInfo.headerType}" encontrado y procesado`);
             
+            // Asegurar que el objeto tenga $namespace
+            if (!headerTypeObject['$namespace'] && schemaObject['$namespace']) {
+                headerTypeObject['$namespace'] = schemaObject['$namespace'];
+            }
+            
+            // Si todavía no tiene $namespace, intentar obtenerlo del nombre del tipo
+            if (!headerTypeObject['$namespace']) {
+                // El nombre del tipo puede tener formato "namespace:localName" o solo "localName"
+                if (headerInfo.headerType.includes(':')) {
+                    const [namespaceUri] = headerInfo.headerType.split(':');
+                    if (namespaceUri.startsWith('http://') || namespaceUri.startsWith('https://')) {
+                        headerTypeObject['$namespace'] = namespaceUri;
+                    }
+                }
+            }
+            
+            if (!headerTypeObject['$namespace']) {
+                warn(`⚠️  El tipo de header ${headerInfo.headerType} no tiene namespace definido, se omite`);
+                continue;
+            }
+            
             // Extraer mappings de namespace para el header
             const headerNamespaceMappings = extractAllNamespaceMappings(headerInfo.headerType, headerTypeObject, schemaObject, allComplexTypes);
             const headerNamespacePrefix = headerNamespaceMappings.typesMapping[headerInfo.headerType]?.prefix || baseNamespacePrefix;

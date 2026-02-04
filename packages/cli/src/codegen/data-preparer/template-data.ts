@@ -1,6 +1,7 @@
 import { NAMESPACE_KEY, XML_SCHEMA_URI } from "../constants.js";
 import type { NamespacePrefixesMapping, NamespaceTagsMapping, NamespaceTypesMapping, TemplateData, TypeObject, InterfaceData, PropsInterfaceData } from "../types.js";
 import { extractLocalName } from "../utils.js";
+import { toPascalCase } from "../../util.js";
 import { generateXmlBodyCode } from "../xml-generator/index.js";
 import { prepareSimpleTypesData } from "./simple-types.js";
 import { preparePropsInterfaceData } from "./props-interface.js";
