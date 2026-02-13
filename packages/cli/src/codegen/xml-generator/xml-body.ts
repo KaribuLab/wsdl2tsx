@@ -4,6 +4,7 @@ import { debugContext } from "../../logger.js";
 import type { TypeObject, TypeDefinition, NamespaceTypesMapping, NamespacePrefixesMapping, TagUsageCollector } from "../types.js";
 import { generateXmlPropertyCode } from "./xml-property.js";
 import { resolveReferencedType, resolveNestedType } from "./type-resolution.js";
+import { getNamespacePrefix } from "../namespaces.js";
 
 /**
  * Genera el código del cuerpo XML principal
@@ -62,6 +63,30 @@ export function generateXmlBodyCode(
     const properties = keys
         .map(key => {
             const element = baseTypeObject[key]!;
+            debugContext("generateXmlBodyCode", `Procesando propiedad "${key}", typeof element: ${typeof element}, element: ${typeof element === 'object' && element !== null ? JSON.stringify(Object.keys(element)).substring(0, 100) : element}`);
+            
+            // Si el elemento es un string, tratarlo como un tipo simple
+            if (typeof element === 'string') {
+                const keyLocalName = extractLocalName(key);
+                const keyCamelCase = toCamelCase(keyLocalName);
+                const propertyPath = propsInterfaceName 
+                    ? `${propsInterfaceName}.${keyCamelCase}`
+                    : keyCamelCase;
+                
+                // Determinar el prefijo del namespace para este elemento
+                const namespacePrefix = getNamespacePrefix(
+                    namespacesTypeMapping,
+                    baseNamespacePrefix,
+                    key,
+                    null,
+                    { $qualified: true } as any,
+                    prefixesMapping
+                );
+                
+                debugContext("generateXmlBodyCode", `Generando tag para tipo simple string "${element}" con propertyPath "${propertyPath}"`);
+                return `<${namespacePrefix}.${keyLocalName}>{props.${propertyPath}}</${namespacePrefix}.${keyLocalName}>`;
+            }
+            
             if (typeof element === 'object' && element !== null) {
                 const keyLocalName = extractLocalName(key);
                 const keyCamelCase = toCamelCase(keyLocalName);
@@ -72,6 +97,7 @@ export function generateXmlBodyCode(
                     ? `${propsInterfaceName}.${keyCamelCase}`
                     : keyCamelCase;
                 
+                debugContext("generateXmlBodyCode", `Llamando a generateXmlPropertyCode para "${key}" con propertyPath "${propertyPath}"`);
                 return generateXmlPropertyCode(
                     namespacesTypeMapping,
                     baseNamespacePrefix,
@@ -86,6 +112,7 @@ export function generateXmlBodyCode(
                     tagUsageCollector
                 );
             }
+            debugContext("generateXmlBodyCode", `⚠ Propiedad "${key}" no es un objeto ni string, omitiendo`);
             return '';
         })
         .filter(Boolean)

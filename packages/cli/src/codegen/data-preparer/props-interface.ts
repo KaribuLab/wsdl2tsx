@@ -9,7 +9,9 @@ import { debugContext } from "../../logger.js";
  * Prepara datos de la interfaz de props para el template
  * Extrae recursivamente todas las propiedades de tipos complejos anidados
  */
-export function preparePropsInterfaceData(typeName: string, typeObject: TypeObject, allTypesForInterfaces?: TypeObject, schemaObject?: any, allComplexTypes?: any): PropsInterfaceData {
+export function preparePropsInterfaceData(typeName: string, typeObject: TypeObject, allTypesForInterfaces?: TypeObject, schemaObject?: any, allComplexTypes?: any, visitedTypes: Set<string> = new Set()): PropsInterfaceData {
+    // IMPORTANTE: No marcar como visitado inmediatamente porque necesitamos expandir las propiedades primero
+    // Solo marcar como visitado cuando vamos a hacer una llamada recursiva para evitar ciclos infinitos
     const keys = getFilteredKeys(typeObject);
     const localNames = keys.map(key => extractLocalName(key));
     debugContext("preparePropsInterfaceData", `Procesando tipo "${typeName}" con ${keys.length} propiedades: ${keys.join(', ')}`);
@@ -235,6 +237,17 @@ export function preparePropsInterfaceData(typeName: string, typeObject: TypeObje
                             // Si tiene otras propiedades además de 'type', debemos combinarlas
                             if (hasOnlyTypeProperty || (!hasTypeAndOtherProperties && refKeys.length === 0)) {
                                 debugContext("preparePropsInterfaceData", `Expandiendo contenido del tipo anidado (wrapper sin otras propiedades)`);
+                                // Evitar procesar el mismo tipo múltiples veces (previene ciclos infinitos)
+                                if (visitedTypes.has(nestedTypeValue)) {
+                                    debugContext("preparePropsInterfaceData", `⚠ Tipo anidado "${nestedTypeValue}" ya fue procesado, evitando recursión infinita`);
+                                    // Retornar estructura básica para evitar recursión infinita
+                                    return {
+                                        properties: [],
+                                        interfaces: []
+                                    };
+                                }
+                                // Marcar el tipo anidado como visitado antes de procesarlo recursivamente
+                                visitedTypes.add(nestedTypeValue);
                                 // Limpiar propiedades internas antes de expandir
                                 const cleanedNestedElement = { ...nestedReferencedElement };
                                 Object.keys(cleanedNestedElement).forEach(key => {
@@ -243,11 +256,21 @@ export function preparePropsInterfaceData(typeName: string, typeObject: TypeObje
                                     }
                                 });
                                 // Usar el tipo anidado directamente
-                                return preparePropsInterfaceData(typeName, cleanedNestedElement, allTypesForInterfaces, schemaObject, allComplexTypes);
+                                return preparePropsInterfaceData(nestedTypeValue, cleanedNestedElement, allTypesForInterfaces, schemaObject, allComplexTypes, visitedTypes);
                             } else {
                                 // El tipo referenciado tiene propiedades además de 'type', debemos combinarlas
                                 debugContext("preparePropsInterfaceData", `Combinando propiedades del wrapper con el tipo anidado`);
-                                // TODO: Implementar combinación de propiedades si es necesario
+                                // Evitar procesar el mismo tipo múltiples veces (previene ciclos infinitos)
+                                if (visitedTypes.has(nestedTypeValue)) {
+                                    debugContext("preparePropsInterfaceData", `⚠ Tipo anidado "${nestedTypeValue}" ya fue procesado, evitando recursión infinita`);
+                                    // Retornar estructura básica para evitar recursión infinita
+                                    return {
+                                        properties: [],
+                                        interfaces: []
+                                    };
+                                }
+                                // Marcar el tipo anidado como visitado antes de procesarlo recursivamente
+                                visitedTypes.add(nestedTypeValue);
                                 // Por ahora, expandir el tipo anidado
                                 const cleanedNestedElement = { ...nestedReferencedElement };
                                 Object.keys(cleanedNestedElement).forEach(key => {
@@ -255,7 +278,7 @@ export function preparePropsInterfaceData(typeName: string, typeObject: TypeObje
                                         delete (cleanedNestedElement as any)[key];
                                     }
                                 });
-                                return preparePropsInterfaceData(typeName, cleanedNestedElement, allTypesForInterfaces, schemaObject, allComplexTypes);
+                                return preparePropsInterfaceData(nestedTypeValue, cleanedNestedElement, allTypesForInterfaces, schemaObject, allComplexTypes, visitedTypes);
                             }
                         }
                     }
@@ -268,7 +291,20 @@ export function preparePropsInterfaceData(typeName: string, typeObject: TypeObje
                         }
                     });
                     debugContext("preparePropsInterfaceData", `Expandiendo tipo referenciado directamente (sin type anidado)`);
-                    return preparePropsInterfaceData(typeName, cleanedReferencedElement, allTypesForInterfaces, schemaObject, allComplexTypes);
+                    // Crear un identificador único para el tipo referenciado basado en sus propiedades o typeName
+                    const referencedTypeId = typeValue || typeName;
+                    // Evitar procesar el mismo tipo múltiples veces (previene ciclos infinitos)
+                    if (visitedTypes.has(referencedTypeId)) {
+                        debugContext("preparePropsInterfaceData", `⚠ Tipo referenciado "${referencedTypeId}" ya fue procesado, evitando recursión infinita`);
+                        // Retornar estructura básica para evitar recursión infinita
+                        return {
+                            properties: [],
+                            interfaces: []
+                        };
+                    }
+                    // Marcar el tipo referenciado como visitado antes de procesarlo recursivamente
+                    visitedTypes.add(referencedTypeId);
+                    return preparePropsInterfaceData(referencedTypeId, cleanedReferencedElement, allTypesForInterfaces, schemaObject, allComplexTypes, visitedTypes);
                 }
             }
             
@@ -284,7 +320,18 @@ export function preparePropsInterfaceData(typeName: string, typeObject: TypeObje
                 const typeKeys = getFilteredKeys(cleanedTypeValue as TypeObject);
                 // Si tiene propiedades, procesar recursivamente el objeto type
                 if (typeKeys.length > 0) {
-                    return preparePropsInterfaceData(typeName, cleanedTypeValue as TypeObject, allTypesForInterfaces, schemaObject, allComplexTypes);
+                    // Evitar procesar el mismo tipo múltiples veces (previene ciclos infinitos)
+                    if (visitedTypes.has(typeName)) {
+                        debugContext("preparePropsInterfaceData", `⚠ Tipo "${typeName}" ya fue procesado, evitando recursión infinita`);
+                        // Retornar estructura básica para evitar recursión infinita
+                        return {
+                            properties: [],
+                            interfaces: []
+                        };
+                    }
+                    // Marcar el tipo como visitado antes de procesarlo recursivamente
+                    visitedTypes.add(typeName);
+                    return preparePropsInterfaceData(typeName, cleanedTypeValue as TypeObject, allTypesForInterfaces, schemaObject, allComplexTypes, visitedTypes);
                 }
             }
         }

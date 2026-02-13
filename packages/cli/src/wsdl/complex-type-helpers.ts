@@ -17,7 +17,8 @@ export async function processImports(
     wsdlFile: string,
     node: XmlNode,
     currentNamespaces: Map<string, string>,
-    object: ComplexTypes
+    object: ComplexTypes,
+    processedSchemas: Set<string> = new Set()
 ): Promise<void> {
     const importNode = getImportNode(node);
     
@@ -36,14 +37,26 @@ export async function processImports(
             return;
         }
         
+        // Crear un identificador único para este schema basado en su schemaLocation
+        const schemaId = item.schemaLocation;
+        
+        // Si ya procesamos este schema, evitar procesarlo de nuevo (previene ciclos infinitos)
+        if (processedSchemas.has(schemaId)) {
+            debugContext("processImports", `Schema ya procesado, omitiendo: ${schemaId}`);
+            return;
+        }
+        
         debugContext("processImports", `Cargando XSD importado desde: ${item.schemaLocation}`);
         
         try {
             const importedXsd = await loadXsd(wsdlFile, item.schemaLocation);
             const schemaNode = getSchemaNode(importedXsd);
             if (schemaNode) {
+                // Marcar este schema como procesado antes de procesarlo recursivamente
+                processedSchemas.add(schemaId);
+                
                 const { complexTypesFromSchema } = await import("./complex-types.js");
-                const importedComplexTypes = await complexTypesFromSchema(wsdlFile, schemaNode, currentNamespaces);
+                const importedComplexTypes = await complexTypesFromSchema(wsdlFile, schemaNode, currentNamespaces, processedSchemas);
                 const importedCount = Object.keys(importedComplexTypes).length;
                 debugContext("processImports", `✓ XSD importado exitosamente: ${importedCount} tipo(s) complejo(s) encontrado(s)`);
                 Object.assign(object, importedComplexTypes);

@@ -7,7 +7,7 @@ import {
 import { complexTypeToObject } from "./processors/index.js";
 import { processImports, processComplexTypeNodes, processElementNodes } from "./complex-type-helpers.js";
 
-export const complexTypesFromSchema = async (wsdlFile: string, node: XmlNode, namespaces: Map<string, string> | undefined): Promise<ComplexTypes> => {
+export const complexTypesFromSchema = async (wsdlFile: string, node: XmlNode, namespaces: Map<string, string> | undefined, processedSchemas: Set<string> = new Set()): Promise<ComplexTypes> => {
     const targetNamespace = node.targetNamespace;
     const isQualified = node.elementFormDefault === 'qualified';
     const schemaNamespaces = namespaces ?? getNamespacesFromNode(node);
@@ -15,7 +15,7 @@ export const complexTypesFromSchema = async (wsdlFile: string, node: XmlNode, na
     let object: ComplexTypes = {};
     
     // Procesar imports
-    await processImports(wsdlFile, node, currentNamespaces, object);
+    await processImports(wsdlFile, node, currentNamespaces, object, processedSchemas);
     
     // Procesar complexType nodes
     processComplexTypeNodes(node, targetNamespace, currentNamespaces, object, isQualified);

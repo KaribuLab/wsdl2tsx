@@ -11,8 +11,21 @@ export async function processSchemaAndImports(
     wsdlPath: string,
     allNamespaces: Map<string, string>,
     allComplexTypes: any,
-    schemaObject: any
+    schemaObject: any,
+    processedSchemas: Set<string> = new Set(),
+    schemaLocation?: string
 ): Promise<void> {
+    // Crear un identificador único para este schema basado en su targetNamespace y schemaLocation
+    const schemaId = schemaLocation || schemaNode.targetNamespace || 'default';
+    
+    // Si ya procesamos este schema, evitar procesarlo de nuevo (previene ciclos infinitos)
+    if (processedSchemas.has(schemaId)) {
+        return;
+    }
+    
+    // Marcar este schema como procesado
+    processedSchemas.add(schemaId);
+    
     // Procesar el schema actual
     const schemaObj = schemaToObject(schemaNode, allNamespaces, allComplexTypes);
     // Combinar objetos, evitando sobrescribir $namespace
@@ -36,11 +49,12 @@ export async function processSchemaAndImports(
                     const importedXsd = await loadXsd(wsdlPath, item.schemaLocation);
                     const importedSchemaNode = getSchemaNode(importedXsd);
                     if (importedSchemaNode) {
-                        // Procesar recursivamente el schema importado
-                        await processSchemaAndImports(importedSchemaNode, wsdlPath, allNamespaces, allComplexTypes, schemaObject);
+                        // Procesar recursivamente el schema importado, pasando el conjunto de schemas procesados y el schemaLocation
+                        await processSchemaAndImports(importedSchemaNode, wsdlPath, allNamespaces, allComplexTypes, schemaObject, processedSchemas, item.schemaLocation);
                     }
                 } catch (error: any) {
                     // Si falla al cargar el XSD externo, continuar sin él
+                    // Los tipos pueden estar definidos en el mismo WSDL
                     const { warn } = await import("../logger.js");
                     warn(`Advertencia: No se pudo cargar el XSD importado desde ${item.schemaLocation}: ${error.message}`);
                 }

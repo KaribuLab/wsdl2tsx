@@ -4,6 +4,7 @@ import { getNamespacePrefix, shouldHavePrefix } from "../namespaces.js";
 import { DEFAULT_OCCURS } from "../constants.js";
 import type { TypeObject, TypeDefinition, NamespaceTypesMapping, NamespacePrefixesMapping, TagUsageCollector } from "../types.js";
 import { resolveReferencedType, resolveNestedType } from "./type-resolution.js";
+import { debugContext } from "../../logger.js";
 
 /**
  * Genera el código del template de una propiedad del cuerpo XML
@@ -66,7 +67,18 @@ export function generateXmlPropertyCode(
         : tagCamelCase;
     
     // Si el elemento tiene un type que es string (referencia), resolverlo y generar el tag intermedio
-    if (typeof elementObject === 'object' && elementObject !== null && typeof elementObject.type === 'string' && (schemaObject || allComplexTypes)) {
+    // IMPORTANTE: Solo intentar resolver si parece ser una referencia a un tipo complejo (contiene ':' o no es un tipo XSD simple conocido)
+    const isXsdSimpleType = typeof elementObject === 'object' && elementObject !== null && typeof elementObject.type === 'string' && 
+        (elementObject.type.startsWith('xsd:') || 
+         elementObject.type === 'string' || 
+         elementObject.type === 'int' || 
+         elementObject.type === 'boolean' || 
+         elementObject.type === 'date' ||
+         elementObject.type === 'dateTime');
+    
+    debugContext("generateXmlPropertyCode", `Procesando propiedad "${key}" (tagLocalName: "${tagLocalName}"), elementObject.type: ${typeof elementObject === 'object' && elementObject !== null ? (typeof elementObject.type) : 'N/A'}, isXsdSimpleType: ${isXsdSimpleType}`);
+    
+    if (typeof elementObject === 'object' && elementObject !== null && typeof elementObject.type === 'string' && (schemaObject || allComplexTypes) && !isXsdSimpleType) {
         const referencedType = elementObject.type;
         const referencedElement = resolveReferencedType(referencedType, schemaObject, allComplexTypes);
         
@@ -269,6 +281,20 @@ export function generateXmlPropertyCode(
         }
         // Si no se pudo resolver o no tiene propiedades, usar la propiedad directamente
         // Esto puede pasar si la referencia no se encuentra o es un tipo simple
+        // En este caso, generar el tag con el valor de la propiedad directamente
+        if (typeof elementObject.type === 'string') {
+            // Es un tipo simple (xsd:string, etc.) o una referencia que no se pudo resolver
+            // Generar el tag con el valor de la propiedad
+            return `${openTag}{props.${currentPropertyPath}}${closeTag}`;
+        }
+    }
+    
+    // Si el elemento tiene un type que es string simple (xsd:string, etc.), generar el tag directamente
+    if (typeof elementObject === 'object' && elementObject !== null && typeof elementObject.type === 'string') {
+        // Es un tipo simple (xsd:string, etc.)
+        debugContext("generateXmlPropertyCode", `Generando tag para tipo simple "${elementObject.type}" con propertyPath "${currentPropertyPath}"`);
+        // Generar el tag con el valor de la propiedad
+        return `${openTag}{props.${currentPropertyPath}}${closeTag}`;
     }
     
     if (typeof elementObject === 'object' && elementObject !== null && typeof elementObject.type === 'object') {
