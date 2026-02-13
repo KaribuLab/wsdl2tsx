@@ -23,6 +23,56 @@ export function preparePropsInterfaceData(typeName: string, typeObject: TypeObje
         const element = typeObject[singleKey]!;
         debugContext("preparePropsInterfaceData", `Procesando propiedad única "${singleKey}" (tipo: ${typeof element})`);
         
+        // IMPORTANTE: Si el elemento es un string que parece ser una referencia (contiene ':'), intentar resolverla
+        if (typeof element === 'string' && element.includes(':') && !element.startsWith('xsd:') && (schemaObject || allComplexTypes)) {
+            const typeLocalName = typeName.split(':').pop() || typeName;
+            const elementLocalName = element.split(':').pop() || element;
+            
+            // Si parece ser una referencia circular (mismo nombre local), buscar el complexType directamente
+            if (elementLocalName === typeLocalName && allComplexTypes) {
+                debugContext("preparePropsInterfaceData", `⚠ Propiedad única "${singleKey}" es string que parece referencia circular "${element}", buscando complexType directamente`);
+                const complexTypeKey = Object.keys(allComplexTypes).find(k => {
+                    const kLocalName = k.split(':').pop() || k;
+                    return kLocalName === typeLocalName;
+                });
+                
+                if (complexTypeKey) {
+                    const complexType = allComplexTypes[complexTypeKey];
+                    if (complexType && typeof complexType === 'object') {
+                        // Verificar si tiene 'type' como objeto (complexType inline)
+                        let finalComplexType = complexType;
+                        if ('type' in complexType && typeof complexType.type === 'object' && complexType.type !== null) {
+                            finalComplexType = complexType.type as any;
+                        }
+                        
+                        const complexKeys = getFilteredKeys(finalComplexType);
+                        debugContext("preparePropsInterfaceData", `Usando complexType "${complexTypeKey}" con ${complexKeys.length} propiedades: ${complexKeys.join(', ')}`);
+                        
+                        // Limpiar propiedades internas
+                        const cleanedComplexType = { ...finalComplexType };
+                        Object.keys(cleanedComplexType).forEach(key => {
+                            if (key.startsWith('_')) {
+                                delete (cleanedComplexType as any)[key];
+                            }
+                        });
+                        
+                        // Evitar procesar el mismo tipo múltiples veces
+                        if (visitedTypes.has(complexTypeKey)) {
+                            debugContext("preparePropsInterfaceData", `⚠ ComplexType "${complexTypeKey}" ya fue procesado, evitando recursión infinita`);
+                            return {
+                                properties: [],
+                                interfaces: []
+                            };
+                        }
+                        
+                        // Marcar el complexType como visitado antes de procesarlo recursivamente
+                        visitedTypes.add(complexTypeKey);
+                        return preparePropsInterfaceData(complexTypeKey, cleanedComplexType, allTypesForInterfaces, schemaObject, allComplexTypes, visitedTypes);
+                    }
+                }
+            }
+        }
+        
         if (typeof element === 'object' && element !== null && 'type' in element) {
             const typeValue = (element as any).type;
             debugContext("preparePropsInterfaceData", `Tipo de propiedad: ${typeof typeValue === 'string' ? `referencia "${typeValue}"` : `objeto complejo`}`);
@@ -233,6 +283,57 @@ export function preparePropsInterfaceData(typeName: string, typeObject: TypeObje
                             debugContext("preparePropsInterfaceData", `Tipo anidado resuelto tiene ${nestedKeys.length} propiedades: ${nestedKeys.join(', ')}`);
                             debugContext("preparePropsInterfaceData", `  Propiedades del tipo anidado (nombres locales): ${nestedLocalNames.join(' -> ')}`);
                             
+                            // IMPORTANTE: Verificar si hay una referencia circular (el tipo anidado tiene el mismo nombre local que el tipo original)
+                            const typeLocalName = typeName.split(':').pop() || typeName;
+                            const nestedTypeLocalName = nestedTypeValue.split(':').pop() || nestedTypeValue;
+                            const isCircularNestedReference = nestedTypeLocalName === typeLocalName;
+                            
+                            if (isCircularNestedReference) {
+                                debugContext("preparePropsInterfaceData", `⚠ Referencia circular detectada en tipo anidado: "${typeName}" (local: "${typeLocalName}") -> "${nestedTypeValue}" (local: "${nestedTypeLocalName}"), buscando complexType directamente`);
+                                // Si hay una referencia circular, buscar el complexType directamente en allComplexTypes
+                                if (allComplexTypes) {
+                                    const complexTypeKey = Object.keys(allComplexTypes).find(k => {
+                                        const kLocalName = k.split(':').pop() || k;
+                                        return kLocalName === typeLocalName;
+                                    });
+                                    
+                                    if (complexTypeKey) {
+                                        const complexType = allComplexTypes[complexTypeKey];
+                                        if (complexType && typeof complexType === 'object') {
+                                            // Verificar si tiene 'type' como objeto (complexType inline)
+                                            let finalComplexType = complexType;
+                                            if ('type' in complexType && typeof complexType.type === 'object' && complexType.type !== null) {
+                                                finalComplexType = complexType.type as any;
+                                            }
+                                            
+                                            const complexKeys = getFilteredKeys(finalComplexType);
+                                            debugContext("preparePropsInterfaceData", `Usando complexType "${complexTypeKey}" con ${complexKeys.length} propiedades: ${complexKeys.join(', ')}`);
+                                            
+                                            // Limpiar propiedades internas
+                                            const cleanedComplexType = { ...finalComplexType };
+                                            Object.keys(cleanedComplexType).forEach(key => {
+                                                if (key.startsWith('_')) {
+                                                    delete (cleanedComplexType as any)[key];
+                                                }
+                                            });
+                                            
+                                            // Evitar procesar el mismo tipo múltiples veces
+                                            if (visitedTypes.has(complexTypeKey)) {
+                                                debugContext("preparePropsInterfaceData", `⚠ ComplexType "${complexTypeKey}" ya fue procesado, evitando recursión infinita`);
+                                                return {
+                                                    properties: [],
+                                                    interfaces: []
+                                                };
+                                            }
+                                            
+                                            // Marcar el complexType como visitado antes de procesarlo recursivamente
+                                            visitedTypes.add(complexTypeKey);
+                                            return preparePropsInterfaceData(complexTypeKey, cleanedComplexType, allTypesForInterfaces, schemaObject, allComplexTypes, visitedTypes);
+                                        }
+                                    }
+                                }
+                            }
+                            
                             // Si el tipo referenciado solo tiene 'type' (es un wrapper), expandir el tipo anidado directamente
                             // Si tiene otras propiedades además de 'type', debemos combinarlas
                             if (hasOnlyTypeProperty || (!hasTypeAndOtherProperties && refKeys.length === 0)) {
@@ -293,6 +394,63 @@ export function preparePropsInterfaceData(typeName: string, typeObject: TypeObje
                     debugContext("preparePropsInterfaceData", `Expandiendo tipo referenciado directamente (sin type anidado)`);
                     // Crear un identificador único para el tipo referenciado basado en sus propiedades o typeName
                     const referencedTypeId = typeValue || typeName;
+                    
+                    // IMPORTANTE: Verificar si hay una referencia circular
+                    // Una referencia circular ocurre cuando el tipo referenciado tiene 'type' que apunta a un tipo con el mismo nombre local
+                    const typeLocalName = typeName.split(':').pop() || typeName;
+                    const referencedTypeLocalName = typeValue ? typeValue.split(':').pop() || typeValue : null;
+                    const isCircularReference = referencedTypeLocalName === typeLocalName && 
+                                                'type' in cleanedReferencedElement && 
+                                                typeof cleanedReferencedElement.type === 'string' &&
+                                                (cleanedReferencedElement.type === typeValue || 
+                                                 cleanedReferencedElement.type.split(':').pop() === typeLocalName);
+                    
+                    if (isCircularReference) {
+                        debugContext("preparePropsInterfaceData", `⚠ Referencia circular detectada: "${typeName}" (local: "${typeLocalName}") -> "${typeValue}" (local: "${referencedTypeLocalName}"), buscando complexType directamente`);
+                        // Si hay una referencia circular, buscar el complexType directamente en allComplexTypes
+                        if (allComplexTypes) {
+                            const complexTypeKey = Object.keys(allComplexTypes).find(k => {
+                                const kLocalName = k.split(':').pop() || k;
+                                return kLocalName === typeLocalName;
+                            });
+                            
+                            if (complexTypeKey) {
+                                const complexType = allComplexTypes[complexTypeKey];
+                                if (complexType && typeof complexType === 'object') {
+                                    // Verificar si tiene 'type' como objeto (complexType inline)
+                                    let finalComplexType = complexType;
+                                    if ('type' in complexType && typeof complexType.type === 'object' && complexType.type !== null) {
+                                        finalComplexType = complexType.type as any;
+                                    }
+                                    
+                                    const complexKeys = getFilteredKeys(finalComplexType);
+                                    debugContext("preparePropsInterfaceData", `Usando complexType "${complexTypeKey}" con ${complexKeys.length} propiedades: ${complexKeys.join(', ')}`);
+                                    
+                                    // Limpiar propiedades internas
+                                    const cleanedComplexType = { ...finalComplexType };
+                                    Object.keys(cleanedComplexType).forEach(key => {
+                                        if (key.startsWith('_')) {
+                                            delete (cleanedComplexType as any)[key];
+                                        }
+                                    });
+                                    
+                                    // Evitar procesar el mismo tipo múltiples veces
+                                    if (visitedTypes.has(complexTypeKey)) {
+                                        debugContext("preparePropsInterfaceData", `⚠ ComplexType "${complexTypeKey}" ya fue procesado, evitando recursión infinita`);
+                                        return {
+                                            properties: [],
+                                            interfaces: []
+                                        };
+                                    }
+                                    
+                                    // Marcar el complexType como visitado antes de procesarlo recursivamente
+                                    visitedTypes.add(complexTypeKey);
+                                    return preparePropsInterfaceData(complexTypeKey, cleanedComplexType, allTypesForInterfaces, schemaObject, allComplexTypes, visitedTypes);
+                                }
+                            }
+                        }
+                    }
+                    
                     // Evitar procesar el mismo tipo múltiples veces (previene ciclos infinitos)
                     if (visitedTypes.has(referencedTypeId)) {
                         debugContext("preparePropsInterfaceData", `⚠ Tipo referenciado "${referencedTypeId}" ya fue procesado, evitando recursión infinita`);

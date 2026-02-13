@@ -5,6 +5,7 @@ import type { TypeObject, TypeDefinition, NamespaceTypesMapping, NamespacePrefix
 import { generateXmlPropertyCode } from "./xml-property.js";
 import { resolveReferencedType, resolveNestedType } from "./type-resolution.js";
 import { getNamespacePrefix } from "../namespaces.js";
+import { shouldHavePrefix } from "../namespaces.js";
 
 /**
  * Genera el código del cuerpo XML principal
@@ -65,8 +66,229 @@ export function generateXmlBodyCode(
             const element = baseTypeObject[key]!;
             debugContext("generateXmlBodyCode", `Procesando propiedad "${key}", typeof element: ${typeof element}, element: ${typeof element === 'object' && element !== null ? JSON.stringify(Object.keys(element)).substring(0, 100) : element}`);
             
-            // Si el elemento es un string, tratarlo como un tipo simple
+            // Si el elemento es un string, verificar si es una referencia a un tipo complejo antes de tratarlo como tipo simple
             if (typeof element === 'string') {
+                // Verificar si parece ser una referencia a un tipo complejo (contiene ':' y no es un tipo XSD simple conocido)
+                const isXsdSimpleType = element.startsWith('xsd:') || 
+                    element === 'string' || 
+                    element === 'int' || 
+                    element === 'boolean' || 
+                    element === 'date' ||
+                    element === 'dateTime';
+                
+                // Si no es un tipo XSD simple y parece ser una referencia (contiene ':'), intentar resolverla
+                if (!isXsdSimpleType && element.includes(':') && (schemaObject || allComplexTypes)) {
+                    const referencedElement = resolveReferencedType(element, schemaObject, allComplexTypes);
+                    
+                    debugContext("generateXmlBodyCode", `Intentando resolver referencia "${element}", resultado: ${referencedElement ? (typeof referencedElement === 'object' ? `objeto con ${Object.keys(referencedElement).length} propiedades: ${Object.keys(referencedElement).join(', ')}` : typeof referencedElement) : 'null'}`);
+                    
+                    if (referencedElement && typeof referencedElement === 'object') {
+                        // Verificar si el elemento referenciado tiene un 'type' que también es un string (referencia anidada)
+                        if ('type' in referencedElement && typeof referencedElement.type === 'string' && !referencedElement.type.startsWith('xsd:')) {
+                            // El tipo referenciado tiene otra referencia, expandir directamente sus propiedades
+                            // IMPORTANTE: Evitar referencias circulares (si el tipo anidado es el mismo que el original)
+                            if (referencedElement.type !== element) {
+                                const nestedReferencedElement = resolveReferencedType(referencedElement.type, schemaObject, allComplexTypes);
+                                
+                                if (nestedReferencedElement && typeof nestedReferencedElement === 'object') {
+                                    // Verificar si el elemento anidado también tiene un 'type' que es un objeto (complexType inline)
+                                    // Si tiene 'type' como objeto, usar ese objeto directamente
+                                    let finalNestedElement = nestedReferencedElement;
+                                    if ('type' in nestedReferencedElement && typeof nestedReferencedElement.type === 'object' && nestedReferencedElement.type !== null) {
+                                        finalNestedElement = nestedReferencedElement.type as any;
+                                        debugContext("generateXmlBodyCode", `Usando complexType inline del tipo anidado "${referencedElement.type}"`);
+                                    }
+                                    
+                                    // Expandir las propiedades del tipo anidado directamente
+                                    const nestedKeys = getFilteredKeys(finalNestedElement);
+                                    debugContext("generateXmlBodyCode", `Expandiendo tipo anidado "${referencedElement.type}" con ${nestedKeys.length} propiedades: ${nestedKeys.join(', ')}`);
+                                    
+                                    // Procesar cada propiedad del tipo anidado
+                                    const keyLocalName = extractLocalName(key);
+                                    const keyCamelCase = toCamelCase(keyLocalName);
+                                    const propertyPath = propsInterfaceName 
+                                        ? `${propsInterfaceName}.${keyCamelCase}`
+                                        : keyCamelCase;
+                                    
+                                    const nestedProperties = nestedKeys
+                                        .map(nestedKey => {
+                                            const nestedElement = finalNestedElement[nestedKey]!;
+                                            if (typeof nestedElement === 'object' && nestedElement !== null) {
+                                                const nestedKeyLocalName = extractLocalName(nestedKey);
+                                                const nestedKeyCamelCase = toCamelCase(nestedKeyLocalName);
+                                                const nestedPropertyPath = `${propertyPath}.${nestedKeyCamelCase}`;
+                                                
+                                                return generateXmlPropertyCode(
+                                                    namespacesTypeMapping,
+                                                    baseNamespacePrefix,
+                                                    nestedKey,
+                                                    nestedElement as TypeDefinition,
+                                                    key,
+                                                    nestedPropertyPath,
+                                                    true,
+                                                    prefixesMapping,
+                                                    schemaObject,
+                                                    allComplexTypes,
+                                                    tagUsageCollector
+                                                );
+                                            } else if (typeof nestedElement === 'string') {
+                                                // Si el elemento anidado es un string simple, generar el tag directamente
+                                                const nestedKeyLocalName = extractLocalName(nestedKey);
+                                                const nestedKeyCamelCase = toCamelCase(nestedKeyLocalName);
+                                                const nestedPropertyPath = `${propertyPath}.${nestedKeyCamelCase}`;
+                                                const nestedNamespacePrefix = getNamespacePrefix(
+                                                    namespacesTypeMapping,
+                                                    baseNamespacePrefix,
+                                                    nestedKey,
+                                                    key,
+                                                    { $qualified: true } as any,
+                                                    prefixesMapping
+                                                );
+                                                
+                                                return `<${nestedNamespacePrefix}.${nestedKeyLocalName}>{props.${nestedPropertyPath}}</${nestedNamespacePrefix}.${nestedKeyLocalName}>`;
+                                            }
+                                            return '';
+                                        })
+                                        .filter(Boolean)
+                                        .join('\n');
+                                    
+                                    // Determinar el prefijo del namespace para el tag wrapper
+                                    const namespacePrefix = getNamespacePrefix(
+                                        namespacesTypeMapping,
+                                        baseNamespacePrefix,
+                                        key,
+                                        null,
+                                        referencedElement as any,
+                                        prefixesMapping
+                                    );
+                                    
+                                    const isQualified = shouldHavePrefix(referencedElement as any);
+                                    const wrapperOpenTag = isQualified ? `<${namespacePrefix}.${keyLocalName}>` : `<${keyLocalName}>`;
+                                    const wrapperCloseTag = isQualified ? `</${namespacePrefix}.${keyLocalName}>` : `</${keyLocalName}>`;
+                                    
+                                    return `${wrapperOpenTag}
+    ${nestedProperties}
+${wrapperCloseTag}`;
+                                }
+                            } else {
+                                debugContext("generateXmlBodyCode", `⚠ Referencia circular detectada: "${element}" -> "${referencedElement.type}", buscando complexType directamente`);
+                                // Si hay una referencia circular, intentar buscar el complexType directamente en allComplexTypes
+                                const typeLocalName = element.split(':').pop() || element;
+                                if (allComplexTypes) {
+                                    const complexTypeKey = Object.keys(allComplexTypes).find(k => {
+                                        const kLocalName = k.split(':').pop() || k;
+                                        return kLocalName === typeLocalName;
+                                    });
+                                    
+                                    if (complexTypeKey) {
+                                        const complexType = allComplexTypes[complexTypeKey];
+                                        if (complexType && typeof complexType === 'object') {
+                                            // Verificar si tiene 'type' como objeto (complexType inline)
+                                            let finalComplexType = complexType;
+                                            if ('type' in complexType && typeof complexType.type === 'object' && complexType.type !== null) {
+                                                finalComplexType = complexType.type as any;
+                                            }
+                                            
+                                            const complexKeys = getFilteredKeys(finalComplexType);
+                                            debugContext("generateXmlBodyCode", `Usando complexType "${complexTypeKey}" con ${complexKeys.length} propiedades: ${complexKeys.join(', ')}`);
+                                            
+                                            // Procesar las propiedades del complexType
+                                            const keyLocalName = extractLocalName(key);
+                                            const keyCamelCase = toCamelCase(keyLocalName);
+                                            const propertyPath = propsInterfaceName 
+                                                ? `${propsInterfaceName}.${keyCamelCase}`
+                                                : keyCamelCase;
+                                            
+                                            // IMPORTANTE: Cuando hay una referencia circular, expandir las propiedades directamente sin wrapper
+                                            // porque el elemento raíz ya es el wrapper
+                                            const complexProperties = complexKeys
+                                                .map(complexKey => {
+                                                    const complexElement = finalComplexType[complexKey]!;
+                                                    if (typeof complexElement === 'object' && complexElement !== null) {
+                                                        const complexKeyLocalName = extractLocalName(complexKey);
+                                                        const complexKeyCamelCase = toCamelCase(complexKeyLocalName);
+                                                        // Usar propertyPath directamente sin agregar el nombre del wrapper
+                                                        const complexPropertyPath = propsInterfaceName 
+                                                            ? `${propsInterfaceName}.${complexKeyCamelCase}`
+                                                            : complexKeyCamelCase;
+                                                        
+                                                        return generateXmlPropertyCode(
+                                                            namespacesTypeMapping,
+                                                            baseNamespacePrefix,
+                                                            complexKey,
+                                                            complexElement as TypeDefinition,
+                                                            null, // parentKey es null porque estamos en el nivel raíz
+                                                            complexPropertyPath,
+                                                            true,
+                                                            prefixesMapping,
+                                                            schemaObject,
+                                                            allComplexTypes,
+                                                            tagUsageCollector
+                                                        );
+                                                    } else if (typeof complexElement === 'string') {
+                                                        const complexKeyLocalName = extractLocalName(complexKey);
+                                                        const complexKeyCamelCase = toCamelCase(complexKeyLocalName);
+                                                        // Usar propertyPath directamente sin agregar el nombre del wrapper
+                                                        const complexPropertyPath = propsInterfaceName 
+                                                            ? `${propsInterfaceName}.${complexKeyCamelCase}`
+                                                            : complexKeyCamelCase;
+                                                        const complexNamespacePrefix = getNamespacePrefix(
+                                                            namespacesTypeMapping,
+                                                            baseNamespacePrefix,
+                                                            complexKey,
+                                                            null, // parentKey es null porque estamos en el nivel raíz
+                                                            { $qualified: true } as any,
+                                                            prefixesMapping
+                                                        );
+                                                        
+                                                        return `<${complexNamespacePrefix}.${complexKeyLocalName}>{props.${complexPropertyPath}}</${complexNamespacePrefix}.${complexKeyLocalName}>`;
+                                                    }
+                                                    return '';
+                                                })
+                                                .filter(Boolean)
+                                                .join('\n');
+                                            
+                                            // Retornar las propiedades directamente sin wrapper cuando hay referencia circular
+                                            return complexProperties;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Es una referencia a un tipo complejo, procesarla como objeto
+                        debugContext("generateXmlBodyCode", `Resolviendo referencia "${element}" a tipo complejo con propiedades: ${Object.keys(referencedElement).filter(k => !k.startsWith('$')).join(', ')}`);
+                        const keyLocalName = extractLocalName(key);
+                        const keyCamelCase = toCamelCase(keyLocalName);
+                        const propertyPath = propsInterfaceName 
+                            ? `${propsInterfaceName}.${keyCamelCase}`
+                            : keyCamelCase;
+                        
+                        // Convertir el string a un objeto TypeDefinition para procesarlo
+                        const elementAsObject: TypeDefinition = { 
+                            type: element, 
+                            $qualified: true 
+                        };
+                        
+                        return generateXmlPropertyCode(
+                            namespacesTypeMapping,
+                            baseNamespacePrefix,
+                            key,
+                            elementAsObject,
+                            null,
+                            propertyPath,
+                            true,
+                            prefixesMapping,
+                            schemaObject,
+                            allComplexTypes,
+                            tagUsageCollector
+                        );
+                    } else {
+                        debugContext("generateXmlBodyCode", `No se pudo resolver la referencia "${element}", tratando como tipo simple`);
+                    }
+                }
+                
+                // Si no se pudo resolver o es un tipo simple, tratarlo como tipo simple
                 const keyLocalName = extractLocalName(key);
                 const keyCamelCase = toCamelCase(keyLocalName);
                 const propertyPath = propsInterfaceName 
