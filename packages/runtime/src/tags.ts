@@ -1,5 +1,5 @@
 export type TagFactory = {
-  [tag: string]: (props?: any) => string;
+  [tag: string]: () => string;
 };
 
 export const xml: TagFactory = new Proxy({} as TagFactory, {

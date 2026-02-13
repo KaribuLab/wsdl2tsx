@@ -26,7 +26,8 @@ export function prepareTemplateData(
     headersInfo?: Array<{ partName: string; elementName: string; headerType: string }>, // Opcional: información de headers
     responseType?: string, // Opcional: tipo de respuesta
     responseTypeObject?: TypeObject, // Opcional: objeto de tipo de respuesta
-    responseAllTypesForInterfaces?: TypeObject // Opcional: tipos referenciados del response
+    responseAllTypesForInterfaces?: TypeObject, // Opcional: tipos referenciados del response
+    unqualifiedTags?: string[] // Opcional: tags sin namespace para generar variables individuales
 ): TemplateData {
     const simpleTypes = prepareSimpleTypesData(requestTypeObject, XML_SCHEMA_URI);
     
@@ -178,6 +179,7 @@ export function prepareTemplateData(
     return {
         requestType: requestTypeLocalName,
         namespaces: filteredNamespaces,
+        unqualifiedTags: unqualifiedTags && unqualifiedTags.length > 0 ? unqualifiedTags : undefined,
         simpleTypes,
         propsInterface,
         interfaces,

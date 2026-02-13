@@ -41,9 +41,9 @@ export function prepareTags(
     const isQualified = shouldHavePrefix(elementObject);
     
     // Generar el tag con o sin prefijo según $qualified
-    // Para tags sin namespace, usar xml.tagName (el runtime maneja el Proxy)
-    const openTag = isQualified ? `<${namespacePrefix}.${tagLocalName}>` : `<xml.${tagLocalName}>`;
-    const closeTag = isQualified ? `</${namespacePrefix}.${tagLocalName}>` : `</xml.${tagLocalName}>`;
+    // Para tags sin namespace, usar variable individual <tagName>
+    const openTag = isQualified ? `<${namespacePrefix}.${tagLocalName}>` : `<${tagLocalName}>`;
+    const closeTag = isQualified ? `</${namespacePrefix}.${tagLocalName}>` : `</${tagLocalName}>`;
     
     // Registrar el tag usado con su prefijo si hay collector
     if (tagUsageCollector && isQualified) {
@@ -52,6 +52,9 @@ export function prepareTags(
         if (prefixesMapping && prefixesMapping[namespacePrefix]) {
             tagUsageCollector.prefixToNamespace.set(namespacePrefix, prefixesMapping[namespacePrefix]);
         }
+    }
+    if (tagUsageCollector && !isQualified) {
+        tagUsageCollector.unqualifiedTags.add(tagLocalName);
     }
     
     return {

@@ -6,7 +6,6 @@ declare global {
       [elemName: string]: any;
     }
     interface Element extends String {}
-    type ElementType = string | ((props?: any) => any);
   }
 }
 

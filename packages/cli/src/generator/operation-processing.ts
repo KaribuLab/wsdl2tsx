@@ -77,6 +77,7 @@ export function processOperation(
     const namespacesTagsMapping = namespaceMappings.tagsMapping;
     const namespacesPrefixMapping = namespaceMappings.prefixesMapping;
     const namespacesTypeMapping = namespaceMappings.typesMapping;
+    const unqualifiedTags = namespaceMappings.unqualifiedTags;
     const baseNamespacePrefix = namespacesTypeMapping[requestType]!.prefix;
     
     // Intentar extraer el tipo de respuesta de la operación
@@ -167,7 +168,8 @@ export function processOperation(
         headersInfo, // Pasar información de headers
         responseType, // Pasar tipo de respuesta si existe
         responseTypeObject, // Pasar objeto de tipo de respuesta si existe
-        responseAllTypesForInterfaces // Pasar tipos referenciados del response
+        responseAllTypesForInterfaces, // Pasar tipos referenciados del response
+        unqualifiedTags
     );
     
     // Compilar el template y generar el código

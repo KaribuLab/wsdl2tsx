@@ -165,7 +165,8 @@ export function extractAllNamespaceMappings(
     // Esto garantiza que el tagsMapping coincida exactamente con el XML generado
     const tagUsageCollector: TagUsageCollector = {
         tagToPrefix: new Map<string, string>(),
-        prefixToNamespace: new Map<string, string>()
+        prefixToNamespace: new Map<string, string>(),
+        unqualifiedTags: new Set<string>()
     };
     
     // Generar el XML temporalmente solo para recolectar información de tags usados
@@ -253,9 +254,13 @@ export function extractAllNamespaceMappings(
     // Usar el nuevo tagsMapping construido desde el uso real
     Object.assign(tagsMapping, newTagsMapping);
     
+    // Unqualified tags como array ordenado sin duplicados
+    const unqualifiedTags = Array.from(tagUsageCollector.unqualifiedTags).sort();
+
     return {
         tagsMapping,
         prefixesMapping,
         typesMapping,
+        unqualifiedTags,
     };
 }

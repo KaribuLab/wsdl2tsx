@@ -41,7 +41,8 @@ export function routeByType(
             isQualified,
             prefixesMapping,
             schemaObject,
-            allComplexTypes
+            allComplexTypes,
+            tagUsageCollector
         );
     } else {
         // No es un array, generar código normal

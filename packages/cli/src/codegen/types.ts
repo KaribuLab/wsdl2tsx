@@ -60,6 +60,7 @@ export interface HeaderData {
 export interface TemplateData {
     requestType: string;
     namespaces: NamespaceTagsMapping;
+    unqualifiedTags?: string[]; // tags sin namespace, para generar const y usar como variables
     simpleTypes: SimpleTypeData[];
     propsInterface: PropsInterfaceData;
     interfaces: InterfaceData[];
@@ -77,6 +78,7 @@ export interface CombinedNamespaceMappings {
     tagsMapping: NamespaceTagsMapping
     prefixesMapping: NamespacePrefixesMapping
     typesMapping: NamespaceTypesMapping
+    unqualifiedTags: string[]
 }
 
 /**
@@ -86,4 +88,5 @@ export interface CombinedNamespaceMappings {
 export interface TagUsageCollector {
     tagToPrefix: Map<string, string>; // tagLocalName -> prefix usado
     prefixToNamespace: Map<string, string>; // prefix -> namespace URI
+    unqualifiedTags: Set<string>; // tagLocalName sin namespace (para variables individuales)
 }

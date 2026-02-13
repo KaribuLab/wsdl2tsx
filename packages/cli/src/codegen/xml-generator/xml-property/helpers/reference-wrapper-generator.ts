@@ -92,12 +92,15 @@ export function generateReferenceWrapper(
         const wrapperIsQualified = (referencedElement as any).$qualified !== false;
         const wrapperOpenTag = wrapperIsQualified 
             ? `<${wrapperNamespacePrefix}.${tagLocalName}>` 
-            : `<xml.${tagLocalName}>`;
+            : `<${tagLocalName}>`;
         const wrapperCloseTag = wrapperIsQualified 
             ? `</${wrapperNamespacePrefix}.${tagLocalName}>` 
-            : `</xml.${tagLocalName}>`;
+            : `</${tagLocalName}>`;
         
         // Registrar el tag wrapper usado con su prefijo si hay collector
+        if (tagUsageCollector && !wrapperIsQualified) {
+            tagUsageCollector.unqualifiedTags.add(tagLocalName);
+        }
         if (tagUsageCollector && wrapperIsQualified) {
             tagUsageCollector.tagToPrefix.set(tagLocalName, wrapperNamespacePrefix);
             // También registrar el namespace URI si tenemos prefixesMapping

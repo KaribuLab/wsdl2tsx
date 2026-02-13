@@ -1,4 +1,4 @@
-import { soap, ns, xml } from "@karibulab/wsdl2tsx-runtime";
+import { soap, ns } from "@karibulab/wsdl2tsx-runtime";
 
 {{#each namespaces}}
 const {{@key}} = ns("{{@key}}", [{{tagNamesArray this}}] as const);
@@ -31,6 +31,11 @@ export interface {{pascalCase responseType}}Props {
 {{/if}}
 
 export function {{pascalCase requestType}}(props: {{pascalCase requestType}}Props) {
+{{#if unqualifiedTags}}
+{{#each unqualifiedTags}}
+    const {{this}} = () => "{{this}}";
+{{/each}}
+{{/if}}
     return <soap.Envelope xmlns:soap="{{soapNamespaceURI}}"
     {{xmlnsAttributes xmlnsAttributes}}>
     <soap.Header>

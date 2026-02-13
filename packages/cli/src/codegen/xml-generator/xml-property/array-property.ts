@@ -2,7 +2,7 @@ import { toCamelCase } from "../../../util.js";
 import { extractLocalName, getFilteredKeys } from "../../utils.js";
 import { getNamespacePrefix, shouldHavePrefix } from "../../namespaces/index.js";
 import { DEFAULT_OCCURS } from "../../constants.js";
-import type { TypeObject, TypeDefinition, NamespaceTypesMapping, NamespacePrefixesMapping } from "../../types.js";
+import type { TypeObject, TypeDefinition, NamespaceTypesMapping, NamespacePrefixesMapping, TagUsageCollector } from "../../types.js";
 import { generateXmlPropertyCode } from "./index.js";
 
 /**
@@ -21,7 +21,8 @@ export function generateArrayPropertyCode(
     isQualified: boolean,
     prefixesMapping: NamespacePrefixesMapping | undefined,
     schemaObject: any,
-    allComplexTypes: any
+    allComplexTypes: any,
+    tagUsageCollector?: TagUsageCollector
 ): string {
     const nestedProperties = keys
         .map(elementKey => {
@@ -47,7 +48,8 @@ export function generateArrayPropertyCode(
                         isQualified,
                         prefixesMapping,
                         schemaObject,
-                        allComplexTypes
+                        allComplexTypes,
+                        tagUsageCollector
                     );
                 } else {
                     // Tipo simple dentro del array - usar 'item' directamente
@@ -66,7 +68,10 @@ export function generateArrayPropertyCode(
                         );
                         return `<${nestedNamespacePrefix}.${nestedTagLocalName}>{item.${nestedTagCamelCase}}</${nestedNamespacePrefix}.${nestedTagLocalName}>`;
                     } else {
-                        return `<xml.${nestedTagLocalName}>{item.${nestedTagCamelCase}}</xml.${nestedTagLocalName}>`;
+                        if (tagUsageCollector) {
+                            tagUsageCollector.unqualifiedTags.add(nestedTagLocalName);
+                        }
+                        return `<${nestedTagLocalName}>{item.${nestedTagCamelCase}}</${nestedTagLocalName}>`;
                     }
                 }
             }
