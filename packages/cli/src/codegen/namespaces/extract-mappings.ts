@@ -1,9 +1,9 @@
-import { extractNamespacePrefix, extractLocalName, getFilteredKeys } from "./utils.js";
-import { NAMESPACE_KEY } from "./constants.js";
-import { debugContext } from "../logger.js";
-import type { TypeObject, CombinedNamespaceMappings, NamespaceTagsMapping, NamespacePrefixesMapping, NamespaceTypesMapping, NamespaceInfo, TagUsageCollector } from "./types.js";
-import { extractNestedTags, flattenKeysWithNamespace, extractAllTagsForXmlBody } from "./namespace-helpers.js";
-import { generateXmlBodyCode } from "./xml-generator/index.js";
+import { extractNamespacePrefix, extractLocalName, getFilteredKeys } from "../utils.js";
+import { NAMESPACE_KEY } from "../constants.js";
+import { debugContext } from "../../logger.js";
+import type { TypeObject, CombinedNamespaceMappings, NamespaceTagsMapping, NamespacePrefixesMapping, NamespaceTypesMapping, TagUsageCollector } from "../types.js";
+import { extractNestedTags, flattenKeysWithNamespace, extractAllTagsForXmlBody } from "../namespace-helpers/index.js";
+import { generateXmlBodyCode } from "../xml-generator/index.js";
 
 /**
  * Extrae todos los mappings de namespace en una sola pasada sobre los datos
@@ -247,12 +247,8 @@ export function extractAllNamespaceMappings(
     }
     
     // Reemplazar tagsMapping con el nuevo construido desde el uso real
-    // Pero mantener los prefijos que ya estaban en prefixesMapping (pueden ser necesarios para xmlns)
-    for (const prefix of Object.keys(prefixesMapping)) {
-        if (!newTagsMapping[prefix]) {
-            newTagsMapping[prefix] = [];
-        }
-    }
+    // NO agregar arrays vacíos para prefijos sin tags (evita advertencias de TypeScript)
+    // Solo mantener prefijos que realmente tienen tags asociados
     
     // Usar el nuevo tagsMapping construido desde el uso real
     Object.assign(tagsMapping, newTagsMapping);
@@ -262,96 +258,4 @@ export function extractAllNamespaceMappings(
         prefixesMapping,
         typesMapping,
     };
-}
-
-/**
- * Obtiene el prefijo de namespace para un elemento
- * Usa el namespace del propio elemento si tiene uno definido
- * Si hay colisiones de prefijos, busca el prefijo único en prefixesMapping
- */
-export function getNamespacePrefix(
-    namespacesTypeMapping: NamespaceTypesMapping, 
-    baseNamespacePrefix: string, 
-    key: string, 
-    parentKey: string | null, 
-    elementObject?: any,
-    prefixesMapping?: NamespacePrefixesMapping
-): string {
-    // Si el elemento tiene su propio $namespace, usarlo para determinar el prefijo
-    // IMPORTANTE: Usar solo el $namespace del elemento, no del tipo interno
-    // El tipo interno puede tener un namespace diferente (del schema donde está definido el tipo)
-    // pero el elemento usa el namespace del schema donde está definido el elemento
-    if (elementObject && typeof elementObject === 'object') {
-        const elemNs = (elementObject as any).$namespace;
-        if (typeof elemNs === 'string') {
-            debugContext("getNamespacePrefix", `Elemento "${key}" tiene namespace: "${elemNs}"`);
-            // Si tenemos prefixesMapping, buscar el prefijo único que corresponde a este URI
-            // Esto es necesario cuando hay colisiones de prefijos (mismo prefijo para diferentes URIs)
-            if (prefixesMapping) {
-                // Buscar el prefijo que corresponde a este URI
-                for (const [prefix, uri] of Object.entries(prefixesMapping)) {
-                    if (uri === elemNs) {
-                        debugContext("getNamespacePrefix", `Encontrado prefijo "${prefix}" para namespace "${elemNs}"`);
-                        return prefix;
-                    }
-                }
-                debugContext("getNamespacePrefix", `No se encontró prefijo en prefixesMapping para "${elemNs}", usando extractNamespacePrefix`);
-            }
-            // Si no se encuentra en prefixesMapping, usar extractNamespacePrefix como fallback
-            // (sin set de prefijos existentes para evitar recursión infinita)
-            const extractedPrefix = extractNamespacePrefix(elemNs);
-            debugContext("getNamespacePrefix", `Usando prefijo extraído: "${extractedPrefix}" para namespace "${elemNs}"`);
-            return extractedPrefix;
-        } else {
-            // Si el elemento no tiene $namespace, verificar si el tipo interno tiene uno
-            if ('type' in elementObject && typeof elementObject.type === 'object' && elementObject.type !== null) {
-                const typeNs = (elementObject.type as any).$namespace;
-                if (typeof typeNs === 'string') {
-                    debugContext("getNamespacePrefix", `Elemento "${key}" no tiene $namespace, pero su tipo tiene: "${typeNs}"`);
-                    if (prefixesMapping) {
-                        for (const [prefix, uri] of Object.entries(prefixesMapping)) {
-                            if (uri === typeNs) {
-                                debugContext("getNamespacePrefix", `Encontrado prefijo "${prefix}" para namespace del tipo "${typeNs}"`);
-                                return prefix;
-                            }
-                        }
-                    }
-                    // (sin set de prefijos existentes para evitar recursión infinita)
-                    const extractedPrefix = extractNamespacePrefix(typeNs);
-                    debugContext("getNamespacePrefix", `Usando prefijo extraído del tipo: "${extractedPrefix}" para namespace "${typeNs}"`);
-                    return extractedPrefix;
-                }
-            }
-        }
-    }
-    
-    // Fallback al mapping existente
-    if (parentKey !== null) {
-        return namespacesTypeMapping[parentKey]?.prefix ?? baseNamespacePrefix;
-    }
-    return namespacesTypeMapping[key]?.prefix ?? baseNamespacePrefix;
-}
-
-/**
- * Determina si un elemento debe tener prefijo de namespace
- * Basado en el atributo elementFormDefault del schema
- */
-export function shouldHavePrefix(elementObject: any): boolean {
-    if (!elementObject || typeof elementObject !== 'object') return false;
-    
-    // Si el elemento tiene $qualified definido, usarlo
-    if ('$qualified' in elementObject && typeof elementObject.$qualified === 'boolean') {
-        return elementObject.$qualified;
-    }
-    
-    // Si el elemento tiene un type que es objeto, verificar si tiene $qualified
-    if ('type' in elementObject && typeof elementObject.type === 'object' && elementObject.type !== null) {
-        const typeObj = elementObject.type;
-        if ('$qualified' in typeObj && typeof typeObj.$qualified === 'boolean') {
-            return typeObj.$qualified;
-        }
-    }
-    
-    // Por defecto, no agregar prefijo (unqualified)
-    return false;
 }

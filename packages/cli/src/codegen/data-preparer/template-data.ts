@@ -5,7 +5,7 @@ import { toPascalCase } from "../../util.js";
 import { debugContext, warn } from "../../logger.js";
 import { generateXmlBodyCode } from "../xml-generator/index.js";
 import { prepareSimpleTypesData } from "./simple-types.js";
-import { preparePropsInterfaceData } from "./props-interface.js";
+import { preparePropsInterfaceData } from "./props-interface/index.js";
 import { prepareInterfacesData } from "./interface.js";
 import { processHeaders, processResponse, prepareTypesForInterfaces } from "./template-data-helpers.js";
 
@@ -141,6 +141,22 @@ export function prepareTemplateData(
     // Usar nombre local del requestType para el template
     const requestTypeLocalName = extractLocalName(requestType);
     
+    // Filtrar namespaces vacíos (sin tags) para evitar advertencias de TypeScript
+    const filteredNamespaces: NamespaceTagsMapping = {};
+    for (const [prefix, tags] of Object.entries(namespacesTagsMapping)) {
+        if (tags && tags.length > 0) {
+            filteredNamespaces[prefix] = tags;
+        }
+    }
+    
+    // También filtrar xmlnsAttributes para excluir prefijos sin tags asociados
+    const filteredXmlnsAttributes: NamespacePrefixesMapping = {};
+    for (const [prefix, uri] of Object.entries(namespacesPrefixMapping)) {
+        if (filteredNamespaces[prefix] && filteredNamespaces[prefix].length > 0) {
+            filteredXmlnsAttributes[prefix] = uri;
+        }
+    }
+    
     // Procesar response si existe
     let responsePropsInterface: PropsInterfaceData | undefined;
     let responseInterfaces: InterfaceData[] | undefined;
@@ -161,12 +177,12 @@ export function prepareTemplateData(
     
     return {
         requestType: requestTypeLocalName,
-        namespaces: namespacesTagsMapping,
+        namespaces: filteredNamespaces,
         simpleTypes,
         propsInterface,
         interfaces,
         soapNamespaceURI,
-        xmlnsAttributes: namespacesPrefixMapping,
+        xmlnsAttributes: filteredXmlnsAttributes,
         xmlBody,
         headers: headers.length > 0 ? headers : undefined,
         responseType: responseType ? extractLocalName(responseType) : undefined,

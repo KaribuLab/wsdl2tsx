@@ -9,7 +9,7 @@ import {
     processTopLevelTypes,
     processRemainingTypes,
     processMissingTypes
-} from "./interface-helpers.js";
+} from "./interface-helpers/index.js";
 
 /**
  * Prepara datos de una interfaz TypeScript para el template

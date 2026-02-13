@@ -1,8 +1,8 @@
 import { toPascalCase, toCamelCase } from "../../util.js";
 import { extractLocalName } from "../utils.js";
 import { generateXmlBodyCode } from "../xml-generator/index.js";
-import { extractAllNamespaceMappings } from "../namespaces.js";
-import { preparePropsInterfaceData } from "./props-interface.js";
+import { extractAllNamespaceMappings } from "../namespaces/index.js";
+import { preparePropsInterfaceData } from "./props-interface/index.js";
 import { prepareSimpleTypesData } from "./simple-types.js";
 import { prepareInterfacesData } from "./interface.js";
 import { NAMESPACE_KEY, XML_SCHEMA_URI } from "../constants.js";
