@@ -39,8 +39,9 @@ export function generateXmlPropertyCode(
     const isQualified = shouldHavePrefix(elementObject);
     
     // Generar el tag con o sin prefijo según $qualified
-    const openTag = isQualified ? `<${namespacePrefix}.${tagLocalName}>` : `<${tagLocalName}>`;
-    const closeTag = isQualified ? `</${namespacePrefix}.${tagLocalName}>` : `</${tagLocalName}>`;
+    // Para tags sin namespace, usar xml.tagName para evitar errores de TypeScript
+    const openTag = isQualified ? `<${namespacePrefix}.${tagLocalName}>` : `<xml.${tagLocalName}>`;
+    const closeTag = isQualified ? `</${namespacePrefix}.${tagLocalName}>` : `</xml.${tagLocalName}>`;
     
     // Registrar el tag usado con su prefijo si hay collector
     if (tagUsageCollector && isQualified) {
@@ -146,10 +147,10 @@ export function generateXmlPropertyCode(
             const wrapperIsQualified = (referencedElement as any).$qualified !== false;
             const wrapperOpenTag = wrapperIsQualified 
                 ? `<${wrapperNamespacePrefix}.${tagLocalName}>` 
-                : `<${tagLocalName}>`;
+                : `<xml.${tagLocalName}>`;
             const wrapperCloseTag = wrapperIsQualified 
                 ? `</${wrapperNamespacePrefix}.${tagLocalName}>` 
-                : `</${tagLocalName}>`;
+                : `</xml.${tagLocalName}>`;
             
             // Registrar el tag wrapper usado con su prefijo si hay collector
             if (tagUsageCollector && wrapperIsQualified) {
@@ -345,7 +346,7 @@ export function generateXmlPropertyCode(
                                 );
                                 return `<${nestedNamespacePrefix}.${nestedTagLocalName}>{item.${nestedTagCamelCase}}</${nestedNamespacePrefix}.${nestedTagLocalName}>`;
                             } else {
-                                return `<${nestedTagLocalName}>{item.${nestedTagCamelCase}}</${nestedTagLocalName}>`;
+                                return `<xml.${nestedTagLocalName}>{item.${nestedTagCamelCase}}</xml.${nestedTagLocalName}>`;
                             }
                         }
                     }

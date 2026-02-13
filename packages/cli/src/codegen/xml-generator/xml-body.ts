@@ -163,8 +163,8 @@ export function generateXmlBodyCode(
                                     );
                                     
                                     const isQualified = shouldHavePrefix(referencedElement as any);
-                                    const wrapperOpenTag = isQualified ? `<${namespacePrefix}.${keyLocalName}>` : `<${keyLocalName}>`;
-                                    const wrapperCloseTag = isQualified ? `</${namespacePrefix}.${keyLocalName}>` : `</${keyLocalName}>`;
+                                    const wrapperOpenTag = isQualified ? `<${namespacePrefix}.${keyLocalName}>` : `<xml.${keyLocalName}>`;
+                                    const wrapperCloseTag = isQualified ? `</${namespacePrefix}.${keyLocalName}>` : `</xml.${keyLocalName}>`;
                                     
                                     return `${wrapperOpenTag}
     ${nestedProperties}
