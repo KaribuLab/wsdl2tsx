@@ -1,6 +1,6 @@
 {
   "name": "wsdl2tsx-monorepo",
-  "version": "1.0.0",
+  "version": "0.1.18",
   "private": true,
   "workspaces": [
     "packages/*"
@@ -24,6 +24,6 @@
   },
   "homepage": "https://github.com/KaribuLab/wsdl2tsx#readme",
   "devDependencies": {
-    "typescript": "5.9.3"
+    "typescript": "6.0.3"
   }
 }
