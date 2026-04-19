@@ -4,9 +4,10 @@
     "module": "esnext",
     "jsx": "react-jsx",
     "jsxImportSource": "@karibulab/wsdl2tsx-runtime/jsx-runtime",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "baseUrl": "src",
     "strict": true,
+    "rootDir": "src",
     "outDir": "dist",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true
